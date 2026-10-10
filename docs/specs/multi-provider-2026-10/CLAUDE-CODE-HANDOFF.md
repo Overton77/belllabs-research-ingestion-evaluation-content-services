@@ -1,5 +1,9 @@
 # Claude Code handoff — multi-provider packet
 
+> **Superseded, 2026-10-10:** read [HANDOFF-2026-10-10.md](HANDOFF-2026-10-10.md) for the current state, remaining work and resume steps. This file and the recovery-audit note below are historical provenance only.
+
+> **Recovery audit, 2026-10-09:** this handoff is historical. Integrated work is now committed/pushed through `efa55f9` in `BellLabs/platform/mission-control`; MP-07/08/09/11/12 retain unintegrated local changes. Read [RECOVERY-HANDOFF-2026-10-09.md](RECOVERY-HANDOFF-2026-10-09.md) before acting on the older checkout, commit, migration or port-script instructions below.
+
 Owner directive, 2026-10-09: continue this implementation in Claude Code. The earlier kickoff line “do not move this implementation to Claude Code” is superseded by that directive. Cursor (Fable 5.1 lead, Opus 5.5 specialists) stopped after integrating wave 2 except MP-10, with integrator wiring still open.
 
 Nothing in this packet has been committed or pushed. Do not commit, push, deploy, run a live migration against the owner database, or make a paid provider call unless the owner asks in the new session.

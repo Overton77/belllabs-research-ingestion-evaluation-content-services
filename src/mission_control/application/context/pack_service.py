@@ -53,6 +53,7 @@ from mission_control.domain.context.packet import (
     TokenCounter,
     WorkspaceRestore,
     pack,
+    packet_binding_name,
 )
 from mission_control.domain.context.render import (
     ContextSelectionRecord,
@@ -64,6 +65,7 @@ from mission_control.domain.context.render import (
     render_workspace_entries,
 )
 from mission_control.domain.execution.contracts import (
+    SESSION_LANE_RUNTIMES,
     OperationExecutionRequest,
     PromptSegment,
     WorkspaceOwner,
@@ -75,6 +77,7 @@ from mission_control.domain.graph_runtime.identities import GoalHandoffCheckpoin
 from mission_control.domain.policies.mailbox import MailboxEntry
 from mission_control.domain.programs.contracts import (
     GoalHandoff,
+    StageAuthoredInput,
     StageGraphAdmissionActivityRequest,
     StageInputBinding,
 )
@@ -338,13 +341,16 @@ class ContextPackService:
                 for chain_binding in supply.bindings:
                     bindings.setdefault(chain_binding.binding_name, chain_binding)
                 candidates.extend(supply.candidates)
+        authored = tuple(
+            item for item in request.authored_inputs if item.consumer_stage_id == identity.stage_id
+        )
         for binding in proposal.frozen_input_bindings:
-            bindings.setdefault(
-                binding.consumer_input_slot_id,
-                ContextBinding(binding_name=binding.consumer_input_slot_id, expand=ExpandMode.AUTO),
-            )
+            name, expand = _stage_binding(binding, authored)
+            bindings.setdefault(name, ContextBinding(binding_name=name, expand=expand))
             candidates.append(
-                await self._accepted_output(binding, request_scope=request.request_scope)
+                await self._accepted_output(
+                    binding, binding_name=name, request_scope=request.request_scope
+                )
             )
         candidates.extend(extra_candidates)
         owner = WorkspaceOwner(kind=WorkspaceOwnerKind.STAGE, owner_id=identity.operation_id)
@@ -399,6 +405,11 @@ class ContextPackService:
         role = request.operation_role
         operation_id = goal_operation_id(request.goal_iteration, role)
         scope_key = request.request_scope
+        # MP-20: the slots stay under the unit's role root (the run's shared GoalDirected
+        # workspace, RRM-020); on a Session Lane the packet is rendered for the lease root the
+        # lane maps that role root to (`goal_packet_root`).
+        slot_root = role_root
+        role_root = goal_packet_root(template, role_root)
         semantic = (
             f"{request.run_id}:goal:{request.goal_iteration}:{role}:"
             f"{request.operation_attempt}:{request.execution_generation}"
@@ -503,6 +514,7 @@ class ContextPackService:
             ),
             request_scope=scope_key,
             owner=owner,
+            slot_root="" if slot_root == role_root else slot_root,
         )
 
     # -- continuation (FT-B4) --------------------------------------------------------------
@@ -936,8 +948,14 @@ class ContextPackService:
         request_scope: str,
         owner: WorkspaceOwner,
         materialize_files: bool = True,
+        slot_root: str = "",
     ) -> SealedPacket:
-        """Pack, persist and render one packet; raise :class:`ContextPackRejected` on failure."""
+        """Pack, persist and render one packet; raise :class:`ContextPackRejected` on failure.
+
+        ``slot_root`` (MP-20) binds the packet's files under that workspace prefix while the
+        packet itself names them relative to the lane's root: a Session Lane GoalDirected
+        unit's role root, which the lane maps to its lease root.
+        """
 
         counter = self._counters.counter_for(pack_request.profile.tokenizer_ref)
         result = pack(pack_request, counter)
@@ -963,6 +981,12 @@ class ContextPackService:
                     text,
                 )
             slots += mission_file_slots(staged, owner, mount_root=pack_request.lane.mount_root)
+            if slot_root:
+                prefix = slot_root.rstrip("/")
+                slots = tuple(
+                    slot.model_copy(update={"logical_path": f"{prefix}{slot.logical_path}"})
+                    for slot in slots
+                )
         return SealedPacket(
             packet=packet,
             selection=selection,
@@ -973,11 +997,11 @@ class ContextPackService:
     # -- candidate capture ----------------------------------------------------------------
 
     async def _accepted_output(
-        self, binding: StageInputBinding, *, request_scope: str
+        self, binding: StageInputBinding, *, binding_name: str, request_scope: str
     ) -> PackCandidate:
         return await self._captured_output(
             binding.artifact_ref,
-            binding_name=binding.consumer_input_slot_id,
+            binding_name=binding_name,
             request_scope=request_scope,
             provenance=ItemProvenance(
                 producer_activation_id=binding.producer_stage_key,
@@ -1039,6 +1063,44 @@ class ContextPackService:
 
 # The whole lane workspace is restored from the Snapshot (lanes map `/` to their root).
 FORK_RESTORE_PATHS: tuple[str, ...] = ("/",)
+
+
+def goal_packet_root(template: OperationExecutionRequest, role_root: str) -> str:
+    """The root a GoalDirected unit's packet names its files under (``.mission/``,
+    ``inputs/``, handoff snapshots): its role root, or the lease root on a Session Lane (MP-20).
+
+    Every unit binds its slots under its role root ``/goal/<n>/<role>`` in the run's shared
+    workspace (RRM-016/RRM-020), and Deep Agents mounts them there. A Session Lane (Cursor,
+    Claude, Codex) maps the unit's role root to its lease root and materializes ``.mission/``,
+    ``inputs/`` and ``outputs/`` there, where its operating contract, first turn and hooks
+    read them; so the packet's index pointer and locations are lease-relative for it.
+    """
+
+    return "" if template.execution_runtime in SESSION_LANE_RUNTIMES else role_root
+
+
+def _stage_binding(
+    binding: StageInputBinding, authored: Sequence[StageAuthoredInput]
+) -> tuple[str, ExpandMode]:
+    """MP-20 (SPEC-02): the packet binding of one frozen stage input.
+
+    The consumer's authored input for this producer (its output, else the only one from that
+    producer) names the binding (``inputs/<name>/``) and sets its tier; without one the
+    dependency slot is the name (``from:<producer>`` binds as ``from-<producer>``) and the tier
+    is ``auto``, as for every run before MP-20.
+    """
+
+    producer = binding.producer_stage_key
+    same_producer = [item for item in authored if item.producer_stage_id == producer]
+    exact = [
+        item
+        for item in same_producer
+        if item.producer_output_slot_id == binding.producer_output_slot_id
+    ]
+    chosen = exact[0] if len(exact) == 1 else same_producer[0] if len(same_producer) == 1 else None
+    if chosen is None:
+        return packet_binding_name(binding.consumer_input_slot_id), ExpandMode.AUTO
+    return packet_binding_name(chosen.name), ExpandMode(chosen.expand)
 
 
 def _purpose(candidates: Sequence[PackCandidate], default: ContextPurpose) -> ContextPurpose:
@@ -1131,7 +1193,8 @@ def _goal_contract_candidates(
             goals_lines.append(f"{title}: " + "; ".join(values))
     writable = ", ".join(template.workspace.exclusive_write_paths)
     workspace_map = (
-        f"Writable (under {role_root}): {writable}. Read-only inputs: {role_root}/inputs/ "
+        f"Writable{f' (under {role_root})' if role_root else ''}: {writable}. "
+        f"Read-only inputs: {role_root}/inputs/ "
         f"(see {role_root}/.mission/inputs.json). This index: {role_root}/.mission/context.md."
     )
     base = f"state://{request.run_id}/goal/{request.goal_iteration}/{role}"

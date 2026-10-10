@@ -172,17 +172,17 @@ async def test_foreign_and_absent_targets_look_the_same() -> None:
         assert (raised.value.code, raised.value.detail) == ("TARGET_NOT_FOUND", "target not found")
 
 
-async def test_provider_frames_need_an_execution_target_and_unknown_filters_fail() -> None:
+async def test_run_targets_carry_frames_and_chains_and_unknown_filters_are_typed() -> None:
     svc, _source = service()
-    with pytest.raises(StreamFailure) as raised:
-        await svc.open(subscription(svc, streams=("provider_frames",)), READER)
-    assert raised.value.code == "UNSUPPORTED_FILTER"
+    # Additive v1: a run target now carries provider frames, one domain per execution.
+    opened = await svc.open(subscription(svc, streams=("provider_frames",)), READER)
+    assert opened.channels() == (f"provider_frames:{FIXTURE_HARNESS}",)
     with pytest.raises(StreamFailure) as raised:
         await svc.open(subscription(svc, filters=StreamFilters(kinds=("Bad Kind!",))), READER)
     assert raised.value.code == "UNSUPPORTED_FILTER"
     with pytest.raises(StreamFailure) as raised:
         await svc.open(subscription(svc, kind="chain", target_id="chain-1"), READER)
-    assert raised.value.code == "UNSUPPORTED_FILTER"
+    assert raised.value.code == "TARGET_NOT_FOUND"
 
 
 def execution_subscription(svc: MissionStreamService, **kwargs: Any) -> StreamSubscription:

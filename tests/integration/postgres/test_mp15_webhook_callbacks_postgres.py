@@ -2,8 +2,8 @@
 
 The receiver is a local asyncio HTTP endpoint on 127.0.0.1 (no external HTTP); the egress
 policy allows loopback explicitly for it, and rejects a destination that resolves into a
-private network before any byte is sent. Coordinator tables come from the PROPOSED 0033 DDL
-applied to the scratch database (see `test_mp15_coordinator_inbox_postgres`).
+private network before any byte is sent. Coordinator tables come from released migration 0033
+(component 1.2.0) in the scratch database (see `test_mp15_coordinator_inbox_postgres`).
 
 Proves:
 - callback retries re-send the stored notification with one delivery id, verify by signature,
@@ -24,14 +24,12 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
-import asyncpg
 import pytest
 import pytest_asyncio
 
 from mission_control.adapters.operations.runtime_ports import EnvironmentSecretResolver
 from mission_control.adapters.postgres.human_tasks.repository import PostgresHumanTaskRepository
 from mission_control.adapters.postgres.subscriptions.coordinator_inbox import (
-    PROPOSED_0033_DDL,
     PostgresCoordinatorInboxStore,
 )
 from mission_control.adapters.postgres.subscriptions.store import PostgresSubscriptionStore
@@ -79,13 +77,8 @@ SECRET_REF = f"environment:{SECRET_ENV}"
 
 @pytest_asyncio.fixture
 async def inbox_db(common_db: CommonDatabase) -> AsyncIterator[CommonDatabase]:  # noqa: F811
-    """The scratch database plus the PROPOSED 0033 coordinator tables (test-only DDL)."""
+    """The scratch database; the coordinator tables come from released migration 0033."""
 
-    owner = await asyncpg.connect(common_db.owner_dsn)
-    try:
-        await owner.execute(PROPOSED_0033_DDL)
-    finally:
-        await owner.close()
     yield common_db
 
 

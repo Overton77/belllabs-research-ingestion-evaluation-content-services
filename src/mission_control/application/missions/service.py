@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from typing import Protocol
+from typing import Any, Protocol
 
 from mission_control.application.execution.boundary_interventions import BoundaryInterventionService
 from mission_control.application.execution.mailbox import (
@@ -80,6 +80,12 @@ class ContinuationCommandPort(Protocol):
         ...
 
 
+class RunApprovalCancellation(Protocol):
+    """MP-11: closes a run's open approval-origin Human Tasks on its stop path."""
+
+    async def cancel_run_approvals(self, run_id: str, *, actor_ref: str) -> tuple[Any, ...]: ...
+
+
 class MissionControlService:
     def __init__(
         self,
@@ -93,6 +99,7 @@ class MissionControlService:
         inline_cap_bytes: int = MAX_INLINE_BYTES,
         forks: ForkLineageReader | None = None,
         inspection: InspectionSources | None = None,
+        approvals: RunApprovalCancellation | None = None,
     ) -> None:
         if not request_scope:
             raise ValueError("an authenticated application/tenant request scope is required")
@@ -110,6 +117,8 @@ class MissionControlService:
         self._forks = forks
         # FT-F6: lane, sessions, mailbox, delivery reports, cursor, chain, subscriptions.
         self._inspection = inspection
+        # MP-11: an admitted cancel closes the run's open approval tasks (after the fence).
+        self._approvals = approvals
 
     @property
     def request_scope(self) -> str:
@@ -216,6 +225,14 @@ class MissionControlService:
             # SPEC-06: a cancel admitted before delivery supersedes every pending entry; the
             # agent never reads an instruction after a stop. Idempotent on replay.
             await self._mailbox.supersede(self._scope, run_id, superseded_by=command_id)
+        if (
+            isinstance(action, CancelAction)
+            and result.status == CommandStatus.ACCEPTED
+            and self._approvals is not None
+        ):
+            # MP-11 (SPEC-03): waiting native callbacks and governed intents of the run observe
+            # `task_cancelled`; a late answer is refused. Idempotent on replay.
+            await self._approvals.cancel_run_approvals(run_id, actor_ref=actor.actor_id)
         if (
             isinstance(action, RequestContinuationAction)
             and result.status == CommandStatus.ACCEPTED

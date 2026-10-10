@@ -42,7 +42,10 @@ from mission_control.adapters.cursor.projection import (
 from mission_control.adapters.cursor.scm import GitBranchPublisher
 from mission_control.adapters.cursor.sse import SseEvent, parse_sse_text, render_sse
 from mission_control.adapters.cursor.workspace import git
+from mission_control.adapters.workspaces.git_workspaces import GitWorkspaceBackend
 from mission_control.application.agentic_components.projections import render_host_files
+from mission_control.application.execution.harness.leases import InMemoryWorkspaceLeaseStore
+from mission_control.application.workspaces.service import WorkspaceAllocator
 from mission_control.domain.agentic_components.projection import ResolvedCapability
 from mission_control.domain.execution.contracts import OperationExecutionRequest
 
@@ -115,10 +118,34 @@ class FakeCloudApi:
     held: asyncio.Event = field(default_factory=asyncio.Event)
     release: asyncio.Event = field(default_factory=asyncio.Event)
     hold_done: bool = False
+    # MP-09 controls (FIXTURE): `429` refusals before any work is accepted, run creates whose
+    # response is lost after the provider accepted, a stream that expires while the run is
+    # still running (`GET run` reports RUNNING for `running_reads` more reads), and usage
+    # responses that omit this run.
+    rate_limited_creates: int = 0
+    rate_limited_runs: int = 0
+    retry_after_s: int | None = 7
+    lose_run_responses: int = 0
+    running_reads: int = 0
+    usage_shape: str = "per_run"  # per_run | totals_only | empty | unavailable
+    # `400 invalid_last_event_id` for a cursor that is not one of this run's event ids.
+    reject_foreign_cursor: bool = False
+    run_reads: int = 0
+    rate_limit_refusals: int = 0
+    expired_served: bool = False
 
     @property
     def run_id(self) -> str:
         return str(self.record["run"]["id"])
+
+    def _rate_limited(self) -> httpx.Response:
+        self.rate_limit_refusals += 1
+        headers = {"Retry-After": str(self.retry_after_s)} if self.retry_after_s else {}
+        return httpx.Response(
+            429,
+            headers=headers,
+            json={"error": {"code": "rate_limited", "message": "too many requests"}},
+        )
 
     def transport(self) -> httpx.MockTransport:
         return httpx.MockTransport(self.handle)
@@ -148,6 +175,9 @@ class FakeCloudApi:
         if not rest and method == "GET":
             return httpx.Response(200, json={"agent": agent})
         if rest == ["runs"] and method == "POST":
+            if self.rate_limited_runs > 0:
+                self.rate_limited_runs -= 1
+                return self._rate_limited()
             run = self.runs[agent["latestRunId"]]
             if self.busy or run["status"] not in {"FINISHED", "ERROR", "CANCELLED", "EXPIRED"}:
                 return self._error(409, "agent_busy")
@@ -155,12 +185,24 @@ class FakeCloudApi:
             self._register_run(new, json.loads(request.content))
             agent["latestRunId"] = new["id"]
             agent["status"] = "ACTIVE"
+            if self.lose_run_responses > 0:
+                # The provider accepted the run; the response never reaches the caller.
+                self.lose_run_responses -= 1
+                raise httpx.ReadError("connection reset after the provider accepted the run")
             return httpx.Response(200, json={"run": new})
         if len(rest) >= 2 and rest[0] == "runs":
             run = self.runs.get(rest[1])
             if run is None:
                 return self._error(404, "run_not_found")
             if len(rest) == 2 and method == "GET":
+                self.run_reads += 1
+                if self.running_reads > 0 and run["status"] != "CANCELLED":
+                    # The stream retention passed while the run kept running.
+                    self.running_reads -= 1
+                    return httpx.Response(200, json={"run": {**run, "status": "RUNNING"}})
+                if self.expired_served and run["status"] in {"CREATING", "RUNNING"}:
+                    # The retention window passed while the run kept running; it is final now.
+                    self._finish(agent, run)
                 return httpx.Response(200, json={"run": run})
             if rest[2:] == ["cancel"] and method == "POST":
                 if run["status"] in {"FINISHED", "ERROR", "CANCELLED", "EXPIRED"}:
@@ -186,6 +228,14 @@ class FakeCloudApi:
         if rest == ["usage"] and method == "GET":
             if url.params.get("runId") not in {None, *self.runs}:
                 return self._error(404, "run_not_found")
+            if self.usage_shape == "unavailable":
+                return self._error(403, "feature_unavailable")
+            if self.usage_shape == "empty":
+                return httpx.Response(200, json={})
+            if self.usage_shape == "totals_only":
+                return httpx.Response(
+                    200, json={"totalUsage": self.record["usage"]["totalUsage"], "runs": []}
+                )
             return httpx.Response(200, json=self.record["usage"])
         if rest == ["archive"] and method == "POST":
             self.archived.append(agent_id)
@@ -196,6 +246,9 @@ class FakeCloudApi:
     def _create(self, request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content)
         self.creates.append(body)
+        if self.rate_limited_creates > 0:
+            self.rate_limited_creates -= 1
+            return self._rate_limited()
         key = request.headers.get("Idempotency-Key")
         if key is not None and key in self.idempotency:
             return httpx.Response(200, json=self.idempotency[key])
@@ -235,12 +288,21 @@ class FakeCloudApi:
     ) -> httpx.Response:
         last = request.headers.get("Last-Event-ID")
         self.stream_requests.append(last)
+        events_of_run = self.run_events.get(run["id"], self.events)
+        if (
+            self.reject_foreign_cursor
+            and last is not None
+            and last not in {event.id for event in events_of_run if event.id is not None}
+        ):
+            return self._error(400, "invalid_last_event_id")
         if (
             self.expire_after is not None
             and last is not None
             and int(last) >= int(self.expire_after)
         ):
-            self._finish(agent, run)
+            self.expired_served = True
+            if self.running_reads <= 0:
+                self._finish(agent, run)
             return self._error(410, "stream_expired")
         events = self.run_events.get(run["id"], self.events)
         held = run["id"] == self.run_id and self.hold_after is not None and not self.hold_done
@@ -354,6 +416,9 @@ class CloudStack:
     artifacts: MemoryArtifacts
     operation: OperationExecutionRequest
     remote: Path
+    # MP-09: the provider workspace ledger the harness records its branch leases in.
+    leases: InMemoryWorkspaceLeaseStore | None = None
+    workspaces: WorkspaceAllocator | None = None
 
 
 def cloud_operation(
@@ -383,6 +448,8 @@ def cloud_stack(
     remote: Path | None = None,
     inputs: Any = None,
     artifacts: MemoryArtifacts | None = None,
+    workspaces: bool = True,
+    harness_changes: dict[str, Any] | None = None,
 ) -> CloudStack:
     events, record_body = load_cloud_fixture(stream, record)
     remote = remote or make_remote(tmp_path)
@@ -402,6 +469,17 @@ def cloud_stack(
     async def env_resolver(ref: str) -> dict[str, str]:
         return dict(env_vars or {})
 
+    leases: InMemoryWorkspaceLeaseStore | None = None
+    allocator: WorkspaceAllocator | None = None
+    if workspaces:
+        leases = InMemoryWorkspaceLeaseStore()
+        root = tmp_path / "provider-workspaces"
+        allocator = WorkspaceAllocator(
+            ledger=leases,
+            backend=GitWorkspaceBackend(root),
+            root=root,
+            allocator_ref="fixture:cursor-cloud",
+        )
     harness = CursorCloudHarness(
         client=client,
         publisher=GitBranchPublisher(tmp_path / "mirrors"),
@@ -410,5 +488,8 @@ def cloud_stack(
         inputs=inputs,
         cost_reader=cost_reader,
         env_resolver=env_resolver,
+        workspaces=allocator,
+        expired_poll_interval_s=0.01,
+        **dict(harness_changes or {}),
     )
-    return CloudStack(harness, api, client, artifacts, operation, remote)
+    return CloudStack(harness, api, client, artifacts, operation, remote, leases, allocator)

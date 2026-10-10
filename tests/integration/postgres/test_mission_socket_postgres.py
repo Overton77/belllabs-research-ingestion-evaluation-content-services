@@ -151,6 +151,8 @@ def deployment(db: CommonDatabase, public_jwks: Any) -> MissionDeployment:
                 actor_id="operator",
                 tenant_ids={db.tenants["tenant-1"]},
                 permissions=ALL_PERMISSIONS | reader,
+                # The lifecycle authority a pause decision names (realtime receipt proof).
+                authority_refs=frozenset({"authority:lifecycle"}),
             ),
             ActorGrant(
                 subject="viewer",

@@ -12,7 +12,12 @@ import sys
 from typing import Any
 
 _PSYCOPG_SELECTOR_MODULES = frozenset(
-    {"test_manifest_launch_production.py", "test_mp22_local_profile_start.py"}
+    {
+        "test_manifest_launch_production.py",
+        "test_mp22_local_profile_start.py",
+        "test_manifest_v2_provider_launch.py",
+        "test_mp20_workflow_parity.py",
+    }
 )
 
 

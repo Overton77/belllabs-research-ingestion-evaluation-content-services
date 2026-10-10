@@ -98,22 +98,47 @@ def parse_frame_cursor(
     return FramePosition(execution_id, cursor.generation, position)
 
 
-def mission_cursor(seq: int) -> StreamCursor:
-    return StreamCursor(stream="mission_events", position=str(seq))
+def mission_cursor(seq: int, mission_id: UUID | None = None) -> StreamCursor:
+    """A mission-event cursor; keyed `<mission_id>:<seq>` when one subscription reads
+    several journals (a `chain` target), plain `<seq>` otherwise."""
+
+    position = str(seq) if mission_id is None else f"{mission_id}:{seq}"
+    return StreamCursor(stream="mission_events", position=position)
 
 
-def parse_mission_cursor(cursor: StreamCursor, *, high_watermark: int) -> int:
+def parse_mission_cursor(
+    cursor: StreamCursor, *, high_watermark: int, mission_id: UUID | None = None
+) -> int:
+    """A client's mission-event cursor. A keyed cursor must name `mission_id`; a plain one
+    is the sequence of the only journal (accepted for keyed journals too)."""
+
     if cursor.stream != "mission_events":
         raise StreamCursorError("SCOPE_MISMATCH", "cursor belongs to another stream")
+    key, separator, tail = cursor.position.rpartition(":")
     try:
-        seq = int(cursor.position)
+        seq = int(tail if separator else cursor.position)
+        named = UUID(key) if separator else None
     except ValueError as error:
         raise StreamCursorError("CURSOR_EXPIRED", "unreadable mission event cursor") from error
+    if named is not None and named != mission_id:
+        raise StreamCursorError("SCOPE_MISMATCH", "cursor names another mission")
     if seq < 0:
         raise StreamCursorError("CURSOR_EXPIRED", "negative mission event cursor")
     if seq > high_watermark:
         raise StreamCursorError("CURSOR_AHEAD", "cursor is past the server high-watermark")
     return seq
+
+
+def mission_cursor_key(cursor: StreamCursor) -> UUID | None:
+    """The mission a keyed mission-event cursor names (None for a plain or unreadable one)."""
+
+    key = cursor.key
+    if not key:
+        return None
+    try:
+        return UUID(key)
+    except ValueError:
+        return None
 
 
 def frame_passes(frame: ProviderFrame, filters: StreamFilters) -> bool:
@@ -153,8 +178,13 @@ def frame_envelope(
     run_ref: str | None = None,
     subordinates: Mapping[tuple[str, int, str], SubordinateRef] | None = None,
     tool_detail: str = "summary",
+    annotations: Mapping[str, object] | None = None,
 ) -> StreamEnvelope:
-    """One provider frame as a `provider_frames` envelope (summary inline, body by ref)."""
+    """One provider frame as a `provider_frames` envelope (summary inline, body by ref).
+
+    `annotations` (the common projection of `application/frames/projections.py`) are added
+    to the payload beside the native fields; they never replace them.
+    """
 
     execution_ref = f"harness_execution:{frame.harness_execution_id}"
     subordinate = None
@@ -179,6 +209,8 @@ def frame_envelope(
     }
     if tool_detail == "full" or frame.kind not in _TOOL_KINDS:
         payload["body_excerpt"] = frame.body_excerpt
+    if annotations:
+        payload.update({key: value for key, value in annotations.items() if key not in payload})
     observed = frame.observed_at.isoformat()
     return StreamEnvelope(
         stream="provider_frames",
@@ -206,6 +238,7 @@ __all__ = [
     "frame_envelope",
     "frame_passes",
     "mission_cursor",
+    "mission_cursor_key",
     "parse_frame_cursor",
     "parse_mission_cursor",
     "subordinate_index",

@@ -547,6 +547,7 @@ class GoalDirectedOperationPreparationService:
             operation=operation,
             heartbeat_timeout_seconds=self._heartbeats.timeout_for(operation),
             segments=self._heartbeats.segments_for(operation),
+            capacity_wait=self._heartbeats.capacity_wait,
         )
         return GoalOperationDispatch(
             workflow_request=workflow_request,

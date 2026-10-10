@@ -1,0 +1,76 @@
+# yaml-language-server: $schema=../../../../src/mission_control/contracts/schemas/mc.mission_manifest.v2.json
+# mission/v2 Stage Graph on the local Claude Agent SDK lane (claude_agent_sdk), with one
+# Deep Agents node mixed in. Checked example (MP-02): compiled by
+# tests/unit/authoring/test_manifest_v2_launch.py against the fast-track fixture catalog, and its
+# launch templates authored against deployments/examples/manifest-launch-bindings.multi-provider.example.json.
+# Profile names (claude.default, claude-sdk-owner-subscription, worker.linux.default) are deployment
+# registry keys; the bindings file resolves them, the manifest never names a model ID or secret.
+manifest: mission/v2
+mission:
+  key: claude-parser-fix
+  title: Fix the failing parser test (Claude Agent SDK)
+  application: ai-engineer
+  goals:
+    - key: patched
+      description: The failing parser test passes with a minimal, reviewed patch
+      objectives:
+        - { key: diagnose, description: Reproduce the failure and locate its cause }
+      criteria:
+        - key: patch_reported
+          description: The patch report names the change and the passing test command
+          evidence: [patch_report]
+          acceptance: { schema: patch_report@1 }
+  environment:
+    lane: claude_agent_sdk
+    model: { profile: claude.default }
+    auth: { profile: claude-sdk-owner-subscription }
+    execution_environment: { kind: local_workspace, profile: worker.linux.default }
+    workspace:
+      repo: { url: "https://github.com/Overton77/mission-control-fixture", ref: main }
+      policy: { mode: managed_worktree, reuse: within_run, dirty_input: reject, cleanup: retain_until_artifacts_registered }
+    continuation: { native_compaction: preferred, fallback: sealed_checkpoint, max_session_turns: 12, max_transfers: 2 }
+    # Mission-wide requirements every lane of this mission admits (Deep Agents included).
+    requires:
+      controls: [cancel]
+      approvals: [workflow_gate]
+      observation: [terminal_result]
+    budget: { tokens: 400000, wall_clock: 2h, tool_calls: 200 }
+    governors: { depth: 1, fan_out: 2, iterations: 4, patience: 2 }
+    side_effects: [read_only, workspace_write]
+  program:
+    key: root
+    behavior: stage_graph
+    objectives: [patched]
+    nodes:
+      - key: diagnose
+        behavior: agent_executor
+        objectives: [diagnose]
+        instruction: Reproduce the failing parser test and write a short diagnosis.
+        outputs: [ { name: diagnosis, schema: diagnosis_note@1 } ]
+      - key: patch
+        behavior: agent_executor
+        objectives: [patched]
+        depends_on: [diagnose]
+        inputs: [ { name: diagnosis, from: diagnose.diagnosis, expand: materialize } ]
+        instruction: Apply the smallest patch that makes the test pass and report it.
+        environment:
+          # Native permission requests bind to Human Tasks on this node (MP-11 broker).
+          requires:
+            controls: [cancel, queue_instruction]
+            approvals: [workflow_gate, provider_permission]
+            observation: [terminal_result, tool_lifecycle]
+          budget: { tokens: 200000 }
+        outputs: [ { name: patch_report, schema: patch_report@1 } ]
+      - key: summarize
+        behavior: agent_executor
+        objectives: [patched]
+        depends_on: [patch]
+        inputs: [ { name: patch_report, from: patch.patch_report, expand: reference } ]
+        instruction: Summarize the patch for the reviewer.
+        environment:
+          lane: deep_agents
+          model: { profile: frontier.default }
+          sandbox: { profile: research.standard }
+        outputs: [ { name: summary, schema: summary_note@1 } ]
+  controls:
+    commands_allowed: [pause, resume, cancel, queue_instruction]

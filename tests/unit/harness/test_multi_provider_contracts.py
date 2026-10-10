@@ -13,7 +13,7 @@ from pydantic import ValidationError
 from mission_control.application.execution.harness.describe import (
     CLAUDE_AGENT_SDK_DESCRIBE,
     CODEX_CLOUD_DESCRIBE,
-    CURSOR_LOCAL_DESCRIBE,
+    CURSOR_LOCAL_DESCRIBE_V1,
     DECLARED_LANE_MATRICES,
     DEEP_AGENTS_DESCRIBE,
 )
@@ -163,7 +163,9 @@ def test_required_features_a_stub_cannot_provide_are_pointed_errors() -> None:
         approvals=("workflow_gate", "provider_permission"),
         observation=("terminal_result", "subordinate_lifecycle"),
     )
-    issues = admit_requirements(CLAUDE_AGENT_SDK_DESCRIBE, requires, pointer="/mission/requires")
+    # What the registry publishes for the implemented-but-unqualified Claude lane: a stub.
+    stub = CLAUDE_AGENT_SDK_DESCRIBE.unqualified()
+    issues = admit_requirements(stub, requires, pointer="/mission/requires")
     by_pointer = {issue.pointer: issue for issue in issues}
     assert set(by_pointer) == {
         "/mission/requires/controls/0",
@@ -175,8 +177,11 @@ def test_required_features_a_stub_cannot_provide_are_pointed_errors() -> None:
     assert {issue.code for issue in issues} == {REQUIREMENT_UNQUALIFIED}
     assert all(issue.lane_profile == "claude_agent_sdk" for issue in issues)
     assert "workflow_gate" not in {issue.requirement for issue in issues}
-    assert not admits(CLAUDE_AGENT_SDK_DESCRIBE, requires)
-    assert admits(CLAUDE_AGENT_SDK_DESCRIBE, RequirementSet())
+    assert not admits(stub, requires)
+    assert admits(stub, RequirementSet())
+    # The implemented matrix (local proof with unqualified lanes allowed) admits what its
+    # adapter provides; subordinate lifecycle stays lifecycle-only, which is enough here.
+    assert admits(CLAUDE_AGENT_SDK_DESCRIBE, requires)
 
 
 def test_unsupported_and_unknown_requirements_are_distinguished() -> None:
@@ -205,8 +210,8 @@ def test_v1_describes_admit_what_their_qualified_controls_prove() -> None:
         observation=("terminal_result", "usage"),
     )
     assert admits(DEEP_AGENTS_DESCRIBE, basic)
-    # Unqualified Cursor stubs prove nothing beyond delivery semantics.
-    issues = admit_requirements(CURSOR_LOCAL_DESCRIBE, basic)
+    # The unqualified Cursor v1 shape proves nothing beyond delivery semantics.
+    issues = admit_requirements(CURSOR_LOCAL_DESCRIBE_V1, basic)
     assert {issue.requirement for issue in issues} == {"terminal_result", "usage"}
     assert {issue.code for issue in issues} == {REQUIREMENT_UNQUALIFIED}
     # Native provider approvals and subordinate visibility have no v1 evidence cell.
@@ -232,10 +237,11 @@ def test_a_qualified_v2_feature_admits_its_requirement() -> None:
         sdk_version="0.1.0",
         qualified_at=NOW,
     )
-    describe = CLAUDE_AGENT_SDK_DESCRIBE.model_copy(
+    stub = CLAUDE_AGENT_SDK_DESCRIBE.unqualified()
+    describe = stub.model_copy(
         update={
             "features": {
-                **CLAUDE_AGENT_SDK_DESCRIBE.features,
+                **stub.features,
                 "cancel": qualified_cell,
                 "observe": qualified_cell,
             }

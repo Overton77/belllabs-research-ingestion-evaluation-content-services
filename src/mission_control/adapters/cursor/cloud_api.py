@@ -48,6 +48,25 @@ class InvalidLastEventId(BridgeError):
     """`400 invalid_last_event_id`: the cursor belongs to another run."""
 
 
+class CloudCapacityLimited(BridgeError):
+    """`429` (standard rate limiting on every Cloud Agents endpoint, `Retry-After` in
+    seconds per the Cursor API overview): a capacity condition the provider stated before
+    any work was accepted. The lane turns it into `ProviderCapacityLimited` so the workflow
+    waits on a Temporal timer (MP-05/06); it is never retried here. Distinct from
+    `409 agent_busy` (`AgentBusy`), which is this agent's own active run (`wait_then_send`,
+    ADR-0030)."""
+
+    def __init__(self, operation: str, *, native_code: str, retry_after_s: int | None) -> None:
+        super().__init__(f"{operation}: provider capacity limited ({native_code or '429'})")
+        self.native_code = native_code
+        self.retry_after_s = retry_after_s
+
+
+def _retry_after(response: httpx.Response) -> int | None:
+    value = response.headers.get("Retry-After", "").strip()
+    return int(value) if value.isdigit() else None
+
+
 @dataclass(frozen=True)
 class StreamOpened:
     retention_seconds: int | None
@@ -89,6 +108,10 @@ def _raise(response: httpx.Response, operation: str) -> None:
         raise AgentNotFound(f"{operation}: not found")
     if status == 400 and code == "invalid_last_event_id":
         raise InvalidLastEventId(f"{operation}: the stream cursor belongs to another run")
+    if status == 429:
+        raise CloudCapacityLimited(
+            operation, native_code=code or "rate_limited", retry_after_s=_retry_after(response)
+        )
     raise BridgeError(f"{operation}: HTTP {status} {code}".rstrip())
 
 
@@ -206,6 +229,7 @@ __all__ = [
     "AgentIdConflict",
     "AgentNotFound",
     "CloudAgentsClient",
+    "CloudCapacityLimited",
     "InvalidLastEventId",
     "StreamExpired",
     "StreamOpened",

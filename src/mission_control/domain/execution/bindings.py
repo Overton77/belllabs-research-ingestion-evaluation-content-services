@@ -188,7 +188,8 @@ class CodexAppServerOptions(BindingContract):
     """Local Codex app-server thread/turn options from the pinned JSON-RPC schema."""
 
     provider: Literal["codex_app_server"] = "codex_app_server"
-    approval_policy: Literal["untrusted", "on-failure", "on-request", "never"] = "on-request"
+    # The pinned app-server `AskForApproval` (codex-cli 0.162.0) has no "on-failure".
+    approval_policy: Literal["untrusted", "on-request", "never"] = "on-request"
     sandbox_mode: Literal["read-only", "workspace-write", "danger-full-access"] = "workspace-write"
     reasoning_effort: Literal["minimal", "low", "medium", "high"] | None = None
     app_server_schema_version: str = Field(min_length=1, max_length=64)

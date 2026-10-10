@@ -97,6 +97,10 @@ _DELIVERY_BY_LANE: dict[str, ContinuationDelivery] = {
     "deep_agents": "turn_boundary_guaranteed",
     "cursor_local": "wait_then_send",
     "cursor_cloud": "wait_then_send",
+    # MP-07: a sealed-checkpoint transfer into a fresh Claude SDK session at a turn boundary.
+    "claude_agent_sdk": "turn_boundary_guaranteed",
+    # MP-08: the continuation turn is a `turn/start` on the fresh thread, sent only when idle.
+    "codex": "wait_then_send",
 }
 
 

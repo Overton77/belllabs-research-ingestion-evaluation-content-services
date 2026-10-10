@@ -179,6 +179,12 @@ CLAUDE_AGENT_SDK_KINDS: dict[str, KindRule] = {
         default=K.TOOL_CALL_COMPLETED,
     ),
     "rate_limit_event": K.STATUS,
+    # MP-07 (claude-agent-sdk 0.2.165): non-closing lifecycle facts the SDK emits.
+    "conversation_reset": K.STATUS,  # types.ConversationResetMessage
+    "system.api_retry": K.STATUS,
+    "system.mirror_error": K.STATUS,  # types.MirrorErrorMessage (SDK-synthesized)
+    "system.session_state_changed": K.STATUS,
+    "system.permission_denied": K.STATUS,
     "permission.requested": K.APPROVAL_REQUESTED,
     "permission.resolved": K.APPROVAL_RESOLVED,
     "result.turn_ended": K.TURN_ENDED,
@@ -224,6 +230,9 @@ CODEX_KINDS: dict[str, KindRule] = {
             "userMessage": K.STATUS,
             "reasoning": K.STATUS,
             "collabAgentToolCall": K.STATUS,
+            "dynamicToolCall": K.TOOL_CALL_STARTED,
+            # The compaction itself is `thread/compacted` (AFTER_COMPACTION); its item is status.
+            "contextCompaction": K.STATUS,
         },
     ),
     "item/completed": ByField(
@@ -234,6 +243,8 @@ CODEX_KINDS: dict[str, KindRule] = {
             "userMessage": K.MESSAGE,
             "reasoning": K.STATUS,
             "collabAgentToolCall": K.STATUS,
+            "dynamicToolCall": _CODEX_ITEM_STATUS,
+            "contextCompaction": K.STATUS,
         },
     ),
     "item/agentMessage/delta": K.MESSAGE_DELTA,
@@ -243,6 +254,23 @@ CODEX_KINDS: dict[str, KindRule] = {
     "item/fileChange/outputDelta": K.TOOL_CALL_DELTA,
     "item/commandExecution/requestApproval": K.APPROVAL_REQUESTED,
     "item/fileChange/requestApproval": K.APPROVAL_REQUESTED,
+    # MP-08: the rest of the pinned (codex-cli 0.162.0) server requests and notifications
+    # this lane receives; anything not pinned stays UNKNOWN and visible.
+    "item/tool/requestUserInput": K.APPROVAL_REQUESTED,
+    "mcpServer/elicitation/request": K.APPROVAL_REQUESTED,
+    "item/permissions/requestApproval": K.APPROVAL_REQUESTED,
+    "item/fileChange/patchUpdated": K.TOOL_CALL_DELTA,
+    "item/commandExecution/terminalInteraction": K.TOOL_CALL_DELTA,
+    "item/mcpToolCall/progress": K.TOOL_CALL_DELTA,
+    "item/plan/delta": K.STATUS,
+    "item/reasoning/summaryPartAdded": K.THINKING_DELTA,
+    "item/autoApprovalReview/started": K.STATUS,
+    "item/autoApprovalReview/completed": K.STATUS,
+    "model/rerouted": K.STATUS,
+    "warning": K.STATUS,
+    "configWarning": K.STATUS,
+    "deprecationNotice": K.STATUS,
+    "guardianWarning": K.STATUS,
     "serverRequest/resolved": K.APPROVAL_RESOLVED,
     "hook/started": K.HOOK_INVOKED,
     "hook/completed": K.HOOK_RESULT,

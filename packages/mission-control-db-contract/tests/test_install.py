@@ -79,7 +79,7 @@ def test_fresh_install_repeat_noop_and_identical_fingerprints(
         identity = json.loads(row)
         assert identity["installation_id"] == target["installation_id"]
         assert identity["application_id"] == target["app"]
-        assert identity["schema_component_version"] == "1.0.0"
+        assert identity["schema_component_version"] == rel.manifest["component_version"]
         attestation = json.loads(
             run(
                 db.fetchval(
@@ -323,14 +323,94 @@ def test_injected_middle_migration_failure_leaves_nothing(make_db, tmp_path, mon
     )
 
 
+# The locked predecessor: `deployments/{biotech,ai-engineer}/release.lock.json` pin component
+# 1.1.0 = migrations 0001..0030 (lock manifest sha256 0853a2c0...). Its schema fingerprint is
+# the LAST entry of `release-spec.json` `compatible_previous_fingerprints`; the test proves
+# that rebuilding exactly this prefix reproduces it, so the constant cannot silently drift.
+# When the locks move to the current version, point these at that locked version.
+PREDECESSOR_VERSION = "1.1.0"
+PREDECESSOR_LAST_MIGRATION = "0030_lane_bindings"
+
+
+def _version_tuple(version: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in version.split("."))
+
+
+def _predecessor_component(destination: Path, release) -> tuple[Path, list[str]]:
+    """The locked predecessor's inputs: its migration prefix (identical bytes) and its spec."""
+    component_root = copy_component(destination, source=release.release_root)
+    keys = [m.key for m in release.migrations]
+    cut = keys.index(PREDECESSOR_LAST_MIGRATION) + 1
+    for path in (component_root / "migrations").glob("*.sql"):
+        if path.stem not in keys[:cut]:
+            path.unlink()
+    spec_path = component_root / "release-spec.json"
+    spec = json.loads(spec_path.read_text(encoding="utf-8"))
+    declared = list(spec["compatible_previous_fingerprints"])
+    spec["component_version"] = PREDECESSOR_VERSION
+    spec["compatible_previous_fingerprints"] = declared[:-1]
+    write_json(spec_path, spec)
+    return component_root, keys[cut:]
+
+
 def test_upgrade_from_declared_predecessor(make_db, release, tmp_path, monkeypatch):
+    """Immutable-history compatibility: an installation of the locked predecessor upgrades in
+    place by applying only the later migrations, as a NON-superuser migration principal."""
+    current = release.manifest["component_version"]
+    assert _version_tuple(current) > _version_tuple(PREDECESSOR_VERSION)
+    declared = release.manifest["compatible_previous_fingerprints"]
+    predecessor_root, later = _predecessor_component(tmp_path / "predecessor", release)
+    predecessor = build_and_lock(tmp_path / "predecessor", predecessor_root, which="B")
+    assert predecessor.manifest["component_version"] == PREDECESSOR_VERSION
+    assert predecessor.manifest["schema_fingerprint"] == declared[-1]
+    for old, new in zip(predecessor.migrations, release.migrations, strict=False):
+        assert (old.key, old.digest) == (new.key, new.digest)  # applied bytes never change
+    assert later and later[-1] == release.migrations[-1].key
+
+    db = make_db("B")
+    target = load_target(write_target(tmp_path, db, monkeypatch=monkeypatch))
+    install(target, predecessor)
+    result, plan = install(target, release)
+    assert plan["plan"]["pending_migrations"] == later
+    assert result["applied_migrations"] == later
+    assert result["schema_fingerprint"] == release.manifest["schema_fingerprint"]
+    assert run(verify_release(target, release, **VERSIONS))["status"] == "verified"
+    receipts = json.loads(
+        run(
+            db.fetchval(
+                "SELECT json_object_agg(migration_key, component_version)::text "
+                "FROM mission_control.component_release"
+            )
+        )
+    )
+    assert receipts == {
+        **{m.key: PREDECESSOR_VERSION for m in predecessor.migrations},
+        **dict.fromkeys(later, current),
+    }
+    assert run(db.fetchval("SELECT count(*) FROM mission_control.release_attestation")) == 2
+    assert (
+        run(
+            db.fetchval(
+                "SELECT schema_component_version FROM mission_control.application_installation"
+            )
+        )
+        == current
+    )
+    # The old release no longer verifies against the upgraded database.
+    with pytest.raises(ContractError):
+        run(verify_release(target, predecessor, **VERSIONS))
+
+
+def test_upgrade_to_a_synthetic_successor(make_db, release, tmp_path, monkeypatch):
     db = make_db("A")
     target = load_target(write_target(tmp_path, db, monkeypatch=monkeypatch))
     install(target, release)
     component_root = copy_component(tmp_path, source=release.release_root)
     spec_path = component_root / "release-spec.json"
     spec = json.loads(spec_path.read_text(encoding="utf-8"))
-    spec["component_version"] = "1.1.0"
+    major, minor, _patch = _version_tuple(release.manifest["component_version"])
+    successor = f"{major}.{minor + 1}.0"
+    spec["component_version"] = successor
     spec["compatible_previous_fingerprints"] = [release.manifest["schema_fingerprint"]]
     write_json(spec_path, spec)
     (component_root / "migrations" / "9000_test_upgrade.sql").write_text(
@@ -347,7 +427,7 @@ def test_upgrade_from_declared_predecessor(make_db, release, tmp_path, monkeypat
                 "SELECT schema_component_version FROM mission_control.application_installation"
             )
         )
-        == "1.1.0"
+        == successor
     )
     # The old release no longer verifies against the upgraded database.
     with pytest.raises(ContractError):

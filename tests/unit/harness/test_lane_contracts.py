@@ -1,8 +1,13 @@
 """FT-G1: `mc.lane_describe.v1`, harness contracts and `mc.cursor_binding.v1`; MP-01: the
-`mc.lane_describe.v2` stubs of the four provider profiles."""
+`mc.lane_describe.v2` stubs of the hosted profiles; MP-07/08/09: the implemented v2 matrices."""
 
 from __future__ import annotations
 
+import hashlib
+import importlib.util
+import json
+import re
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -10,10 +15,13 @@ from pydantic import ValidationError
 
 from mission_control.application.execution.harness.describe import (
     CURSOR_CLOUD_DESCRIBE,
+    CURSOR_CLOUD_DESCRIBE_V1,
     CURSOR_LOCAL_DESCRIBE,
+    CURSOR_LOCAL_DESCRIBE_V1,
     DECLARED_LANE_MATRICES,
     DEEP_AGENTS_DESCRIBE,
     V1_LANE_PROFILES,
+    V2_IMPLEMENTED_LANE_PROFILES,
     V2_STUB_LANE_PROFILES,
     declared_matrix,
 )
@@ -83,13 +91,16 @@ ARCHITECTURE_DELIVERY: dict[str, dict[str, str]] = {
 }
 
 
-@pytest.mark.parametrize("profile", sorted(V1_LANE_PROFILES))
+@pytest.mark.parametrize("profile", sorted(ARCHITECTURE_MATRIX))
 def test_declared_matrices_match_the_architecture_lane_matrix(profile: str) -> None:
     describe = declared_matrix(profile)
-    # Round trip through the wire contract: the fixtures validate as mc.lane_describe.v1.
     assert LaneDescribe.model_validate_json(describe.model_dump_json()) == describe
-    assert describe.schema_version == "mc.lane_describe.v1"
-    assert not describe.is_v2 and "features" not in describe.model_dump(mode="json")
+    if profile in V1_LANE_PROFILES:
+        # Round trip through the wire contract: the fixture validates as mc.lane_describe.v1.
+        assert describe.schema_version == "mc.lane_describe.v1"
+        assert not describe.is_v2 and "features" not in describe.model_dump(mode="json")
+    else:
+        assert describe.is_v2 and set(describe.features) == set(LANE_FEATURES)
     for control, support in ARCHITECTURE_MATRIX[profile].items():
         assert describe.controls[control] == support, control
     for command, semantics in ARCHITECTURE_DELIVERY[profile].items():
@@ -98,8 +109,38 @@ def test_declared_matrices_match_the_architecture_lane_matrix(profile: str) -> N
 
 def test_the_seven_profiles_are_declared_and_partitioned() -> None:
     assert set(DECLARED_LANE_MATRICES) == set(LANE_PROFILES)
-    assert set(LANE_PROFILES) == V1_LANE_PROFILES | V2_STUB_LANE_PROFILES
-    assert not (V1_LANE_PROFILES & V2_STUB_LANE_PROFILES)
+    groups = (V1_LANE_PROFILES, V2_IMPLEMENTED_LANE_PROFILES, V2_STUB_LANE_PROFILES)
+    assert set(LANE_PROFILES) == frozenset().union(*groups)
+    assert sum(len(group) for group in groups) == len(LANE_PROFILES)
+
+
+def test_the_cursor_v1_shapes_stay_readable_beside_their_v2_matrices() -> None:
+    """MP-09: v2 adds per-feature evidence; controls, delivery and identity are unchanged."""
+
+    for v1, v2 in (
+        (CURSOR_LOCAL_DESCRIBE_V1, CURSOR_LOCAL_DESCRIBE),
+        (CURSOR_CLOUD_DESCRIBE_V1, CURSOR_CLOUD_DESCRIBE),
+    ):
+        assert v1.schema_version == "mc.lane_describe.v1" and not v1.is_v2
+        assert LaneDescribe.model_validate_json(v1.model_dump_json()) == v1
+        assert v2.is_v2 and v2.qualified is False and v1.digest != v2.digest
+        assert (v2.controls, v2.delivery_semantics, v2.identity) == (
+            v1.controls,
+            v1.delivery_semantics,
+            v1.identity,
+        )
+        assert not any(evidence.qualified for evidence in v2.features.values())
+
+
+@pytest.mark.parametrize("profile", sorted(V2_IMPLEMENTED_LANE_PROFILES))
+def test_implemented_v2_matrices_carry_evidence_and_nothing_is_qualified(profile: str) -> None:
+    describe = declared_matrix(profile)
+    assert LaneDescribe.model_validate_json(describe.model_dump_json()) == describe
+    assert describe.is_v2 and describe.qualified is False
+    assert set(describe.features) == set(LANE_FEATURES)
+    assert not any(evidence.qualified for evidence in describe.features.values())
+    assert "workflow_gate" in describe.approval_modes
+    assert describe.placement == ("cloud" if profile == "cursor_cloud" else "worker_hosted")
 
 
 @pytest.mark.parametrize("profile", sorted(V2_STUB_LANE_PROFILES))
@@ -299,34 +340,87 @@ def test_usage_report_never_counts_unknown_as_tokens() -> None:
     assert UsageReport(disposition="estimated", total_tokens=3).total_tokens == 3
 
 
-def _seeded_describes(migration: str) -> dict[str, Any]:
-    import json
-    import re
-    from pathlib import Path
+_DB_CONTRACT = Path(__file__).resolve().parents[3] / "packages/mission-control-db-contract"
+_MIGRATIONS = _DB_CONTRACT / "component/migrations"
+_LANE_DESCRIBE_MIGRATION = "0033_approvals_coordinator_inbox_lane_describes.sql"
+# Released (locked 1.1.0, 0030) and unreleased-but-built (0031) bytes: never edited.
+_IMMUTABLE_LANE_MIGRATIONS = {
+    "0030_lane_bindings.sql": "c057bc275ab7162f1109646323a0aba82fd8c8b89bc9240df48ebc44501027cf",
+    "0031_multi_provider_lanes.sql": (
+        "21ac0c9ae225d322f6fa44a9f49187d3f5d9018f663558a999ff42f5b80d2df1"
+    ),
+}
 
-    sql = (
-        Path(__file__).resolve().parents[3]
-        / "packages/mission-control-db-contract/component/migrations"
-        / migration
-    ).read_text("utf-8")
+
+def _seeded_describes(migration: str) -> dict[str, Any]:
+    """The describe documents a migration INSERTs into `lane_profile`, by profile."""
+
+    sql = (_MIGRATIONS / migration).read_text("utf-8")
     return {
         match.group(1): json.loads(match.group(2))
         for match in re.finditer(r"\('([a-z_]+)', '[a-z_]+', '[a-z_]+',\s*'(\{.*?\})'::jsonb", sql)
     }
 
 
-def test_migrations_0030_and_0031_seed_exactly_the_declared_describes() -> None:
-    """0030 seeded the three FT-G1 v1 matrices (applied bytes, never edited); 0031 seeds the
-    four MP-01 v2 stubs. Together they are exactly the declared registry."""
+def _revised_describes(migration: str) -> dict[str, Any]:
+    """The describe documents a migration UPDATEs on `lane_profile`, by profile."""
 
+    sql = (_MIGRATIONS / migration).read_text("utf-8")
+    pattern = (
+        r"UPDATE mission_control\.lane_profile\s+SET describe = '((?:[^']|'')*)'::jsonb\s+"
+        r"WHERE lane_profile = '([a-z_]+)' AND NOT qualified;"
+    )
+    revised: dict[str, Any] = {}
+    for match in re.finditer(pattern, sql):
+        assert match.group(2) not in revised, f"{match.group(2)} revised twice in {migration}"
+        revised[match.group(2)] = json.loads(match.group(1).replace("''", "'"))
+    return revised
+
+
+def test_lane_profile_migrations_end_at_exactly_the_declared_describes() -> None:
+    """0030 seeded the FT-G1 v1 matrices and 0031 the MP-01 v2 stubs (their bytes never change);
+    0033 revises Cursor, Claude Agent SDK and Codex to their implemented v2 matrices. The rows
+    an installation ends with are exactly the declared registry. A describe change in code
+    without a regenerated (still unreleased) 0033 section fails here: run
+    `packages/mission-control-db-contract/scripts/lane_describe_refresh.py --write`."""
+
+    for name, digest in _IMMUTABLE_LANE_MIGRATIONS.items():
+        assert hashlib.sha256((_MIGRATIONS / name).read_bytes()).hexdigest() == digest, name
     seeded_0030 = _seeded_describes("0030_lane_bindings.sql")
     seeded_0031 = _seeded_describes("0031_multi_provider_lanes.sql")
-    assert set(seeded_0030) == V1_LANE_PROFILES
-    assert set(seeded_0031) == V2_STUB_LANE_PROFILES
-    assert {**seeded_0030, **seeded_0031} == {
+    revised_0033 = _revised_describes(_LANE_DESCRIBE_MIGRATION)
+    assert set(seeded_0030) == {"deep_agents", "cursor_local", "cursor_cloud"}
+    assert set(seeded_0031) == {"claude_agent_sdk", "codex", "claude_cloud", "codex_cloud"}
+    assert set(revised_0033) == V2_IMPLEMENTED_LANE_PROFILES
+    assert {**seeded_0030, **seeded_0031, **revised_0033} == {
         profile: describe.model_dump(mode="json")
         for profile, describe in DECLARED_LANE_MATRICES.items()
     }
-    for document in seeded_0031.values():
+    assert set(seeded_0030) - set(revised_0033) == V1_LANE_PROFILES
+    assert set(seeded_0031) - set(revised_0033) == V2_STUB_LANE_PROFILES
+    for document in (*seeded_0031.values(), *revised_0033.values()):
         assert document["qualified"] is False
         assert document["schema_version"] == "mc.lane_describe.v2"
+
+
+def test_migration_0033_lane_describe_section_is_the_generated_text() -> None:
+    """The 0033 section is byte-for-byte what the generator renders from the code (same
+    serialization as 0030/0031: sorted keys, compact separators)."""
+
+    spec = importlib.util.spec_from_file_location(
+        "lane_describe_refresh", _DB_CONTRACT / "scripts/lane_describe_refresh.py"
+    )
+    assert spec is not None and spec.loader is not None
+    generator = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(generator)
+    sql = (_MIGRATIONS / _LANE_DESCRIBE_MIGRATION).read_bytes().decode("utf-8")
+    assert generator.current_section(sql) == generator.render_section(
+        generator.declared_documents()
+    ), "0033 lane describe section drifted from DECLARED_LANE_MATRICES; regenerate it"
+    # The same serialization reproduces an applied 0031 seed literal exactly.
+    claude_cloud = generator.describe_literal(
+        DECLARED_LANE_MATRICES["claude_cloud"].model_dump(mode="json")
+    )
+    assert f"'{claude_cloud}'::jsonb" in (_MIGRATIONS / "0031_multi_provider_lanes.sql").read_text(
+        "utf-8"
+    )

@@ -35,7 +35,7 @@ conflict rather than choosing silently.
 | Design or review an Evaluator Optimizer | [Evaluator Optimizer](evaluator-optimizer.md) |
 | Change a definition, propose or activate a revision | [Revisions](revisions.md) |
 | Add a wait, timer, human gate or proof gate | [Durable controls](durable-controls.md) |
-| Run a Human Gate, resolve a Human Task over HTTP, MCP or the socket | [Human Gates](human-gates.md) |
+| Run a Human Gate, resolve a Human Task or a native approval over HTTP, MCP or the socket; prepare a governed effect | [Human Gates](human-gates.md) |
 | Decide whether work is accepted | [Completion](completion.md) |
 | Drive a mission from interview or manifest to start; see why start is blocked | [Authoring](authoring.md) |
 | Write, compile, submit or start a Mission Manifest | [Mission Manifest](mission-manifest.md) |
@@ -54,9 +54,10 @@ conflict rather than choosing silently.
 | Run work on a lane, read a lane describe or add a lane; generate agent-host config | [Lanes and harness](lanes-and-harness.md) |
 | Understand session ownership, the native dispatch journal, capacity waits or auth routes | [Session ownership and dispatch](session-ownership-and-dispatch.md) |
 | Run, control or qualify Cursor Local or Cursor Cloud work | [Cursor lane](cursor-lane.md) |
+| Run, control or qualify Claude Agent SDK or Codex work on a Linux/WSL worker; bind native approvals | [Provider lanes](provider-lanes.md) |
 | Change the Deep Agents lane, its materializer, middleware or hosted subordinates | [Deep Agents lane](deep-agents-lane.md) |
 | Select context, build a Context Packet, hand off state or classify a checkpoint lineage | [Context and continuation](context-and-continuation.md) |
-| Seal, validate or transfer a Continuation Checkpoint; see why it does not run yet | [Continuation checkpoint](continuation-checkpoint.md) |
+| Seal, validate or transfer a Continuation Checkpoint; follow the Session Lane continuation phase machine | [Continuation checkpoint](continuation-checkpoint.md) |
 | Touch evidence, domain writes or the Biotech integration | [Knowledge Services](knowledge-services.md) |
 | Check release gates, proof statuses, lane qualification and what is live; read the per-profile release statement | [Release and qualification](release-and-qualification.md) |
 

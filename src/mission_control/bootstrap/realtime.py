@@ -40,6 +40,7 @@ from mission_control.bootstrap.api import (
 )
 from mission_control.bootstrap.settings import Settings, get_settings
 from mission_control.interfaces.socketio.app import MissionSocketConfig, mount_mission_socketio
+from mission_control.interfaces.socketio.server import MissionSocketLimits
 
 
 def mission_socket_config(settings: Settings) -> MissionSocketConfig:
@@ -49,6 +50,10 @@ def mission_socket_config(settings: Settings) -> MissionSocketConfig:
         allowed_origins=tuple(settings.cors_origins),
         redis_url=(
             settings.redis_url.get_secret_value() if settings.mission_socket_redis_fanout else None
+        ),
+        limits=MissionSocketLimits(
+            reauthorize_seconds=settings.mission_socket_reauthorize_seconds,
+            command_follow_seconds=settings.mission_socket_command_follow_seconds,
         ),
     )
 

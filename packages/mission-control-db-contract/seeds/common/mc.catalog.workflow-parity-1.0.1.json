@@ -1,0 +1,135 @@
+{
+  "actor_ref": "seed:mission-control-catalog",
+  "component_compatibility": ">=1.0.0 <2.0.0",
+  "depends_on": [
+    {
+      "seed_key": "mc.catalog.workflow-parity",
+      "seed_version": "1.0.0"
+    }
+  ],
+  "description": "Successor of mc.catalog.workflow-parity@1.0.0 (frozen): the StageGraph and GoalDirected families as the worker registers them now (with the Human Gate workflow), as asset version 2. No product Workflow Types, missions or runs.",
+  "format": "mission-control-seed/v1",
+  "records": [
+    {
+      "fields": {
+        "asset_id": "workflow-family:stagegraph",
+        "contract": "mission-control.workflow-family/1",
+        "kind": "policy",
+        "manifest": {
+          "blueprint_contract": "mission_control.domain.authoring.contracts.StageGraphBlueprint",
+          "family": "StageGraph",
+          "source_refs": [
+            "src/mission_control/domain/authoring/contracts.py",
+            "src/mission_control/adapters/temporal/registration/workflows.py",
+            "src/mission_control/adapters/temporal/registration/activities.py"
+          ],
+          "temporal_activities": [
+            "admit_operation",
+            "apply_boundary_command",
+            "apply_cycle",
+            "complete_stagegraph",
+            "decide_result",
+            "initialize",
+            "settle_baseline"
+          ],
+          "temporal_workflows": [
+            "BellLabsRunWorkflow",
+            "HumanGateWorkflow",
+            "MissionOperationWorkflow",
+            "MissionRunWorkflow",
+            "OperationWorkflow",
+            "StageGraphWorkflow"
+          ],
+          "vocabulary": "mission-control.workflow-family/1"
+        },
+        "manifest_digest": "sha256:230da0fe0f2a7acaa3c532fc387bda5d426f7a34a1a8d5bce238e3f8a74304d1",
+        "manifest_ref": "repo://src/mission_control/adapters/temporal/registration#StageGraph",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "2"
+      },
+      "kind": "asset_version",
+      "logical_key": "workflow-family:stagegraph/2"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "workflow-family:stagegraph/2",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "src/mission_control/domain/authoring/contracts.py",
+          "src/mission_control/adapters/temporal/registration/workflows.py",
+          "src/mission_control/adapters/temporal/registration/activities.py"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "workflow-family:stagegraph/2:admit"
+    },
+    {
+      "fields": {
+        "asset_id": "workflow-family:goal-directed",
+        "contract": "mission-control.workflow-family/1",
+        "kind": "policy",
+        "manifest": {
+          "blueprint_contract": "mission_control.domain.authoring.contracts.GoalDirectedBlueprint",
+          "family": "GoalDirected",
+          "source_refs": [
+            "src/mission_control/domain/authoring/contracts.py",
+            "src/mission_control/adapters/temporal/registration/workflows.py",
+            "src/mission_control/adapters/temporal/registration/activities.py"
+          ],
+          "temporal_activities": [
+            "apply_boundary_command",
+            "apply_lifecycle_command",
+            "execute_iteration",
+            "materialize_workflow_result",
+            "prepare_handoff",
+            "verify_iteration"
+          ],
+          "temporal_workflows": [
+            "BellLabsRunWorkflow",
+            "GoalDirectedWorkflow",
+            "HumanGateWorkflow",
+            "MissionOperationWorkflow",
+            "MissionRunWorkflow",
+            "OperationWorkflow"
+          ],
+          "vocabulary": "mission-control.workflow-family/1"
+        },
+        "manifest_digest": "sha256:274b430bfed159dfb12cf0277df0d02a9713d9ef0a482f149fc545d6e2790d28",
+        "manifest_ref": "repo://src/mission_control/adapters/temporal/registration#GoalDirected",
+        "required_compatibility": [
+          ">=1.0.0 <2.0.0"
+        ],
+        "status": "admitted",
+        "version": "2"
+      },
+      "kind": "asset_version",
+      "logical_key": "workflow-family:goal-directed/2"
+    },
+    {
+      "fields": {
+        "actor_ref": "seed:mission-control-catalog",
+        "asset_version": "workflow-family:goal-directed/2",
+        "decided_at": "2026-10-03T00:00:00Z",
+        "decision": "admit",
+        "disposition": "seeded-from-reviewed-source",
+        "evidence_refs": [
+          "src/mission_control/domain/authoring/contracts.py",
+          "src/mission_control/adapters/temporal/registration/workflows.py",
+          "src/mission_control/adapters/temporal/registration/activities.py"
+        ],
+        "policy_ref": "mission-control.seed-admission/1"
+      },
+      "kind": "asset_decision",
+      "logical_key": "workflow-family:goal-directed/2:admit"
+    }
+  ],
+  "seed_key": "mc.catalog.workflow-parity",
+  "seed_version": "1.0.1"
+}

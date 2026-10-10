@@ -8,6 +8,7 @@ a new seed version, not new bytes under an applied version.
 | Directory | Bundle | Content | Apply to |
 | --- | --- | --- | --- |
 | `common/` | `mc.catalog.workflow-parity@1.0.0` | StageGraph / GoalDirected workflow-family vocabulary (registered blueprint contract, Temporal workflows and activities) | both apps, identical bytes |
+| `common/` | `mc.catalog.workflow-parity@1.0.1` | Successor of 1.0.0 (frozen): both families as registered now, with the MP-10 Human Gate workflow, as asset version 2; never rewrites a 1.0.0 logical key | both apps, identical bytes |
 | `common/` | `mc.catalog.runtime-profiles@1.0.0` | runtime persistence descriptor pins; Agent Server graph pins (native persistence unqualified) | both apps, identical bytes |
 | `common/` | `mc.catalog.approved-assets@1.0.0` | `skill.mission-control-coordinator`, `prompt.coordinator.propose-workflow` (published-definition r1), canonical `skills/mission-control` manifest | both apps, identical bytes |
 | `biotech/`, `ai-engineer/` | `mc.app.bindings@1.0.0` | app identity from `deployments/<app>/target.toml`, secret reference names only | that app only |

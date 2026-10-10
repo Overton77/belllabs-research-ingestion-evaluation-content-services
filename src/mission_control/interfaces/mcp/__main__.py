@@ -7,6 +7,9 @@ from typing import cast
 
 import asyncpg
 
+from mission_control.adapters.postgres.approvals.context import PostgresApprovalContextProbe
+from mission_control.adapters.postgres.approvals.intents import PostgresGovernedIntentRepository
+from mission_control.adapters.postgres.approvals.tasks import PostgresApprovalTaskRepository
 from mission_control.adapters.postgres.capability.capability_search_repository import PostgresPool
 from mission_control.adapters.postgres.chains.store import PostgresChainReader
 from mission_control.adapters.postgres.connections import (
@@ -22,15 +25,21 @@ from mission_control.adapters.postgres.frames.transcript_projection import (
 )
 from mission_control.adapters.postgres.frames.transcript_reads import PostgresMissionEventReader
 from mission_control.adapters.postgres.human_tasks.repository import PostgresHumanTaskRepository
+from mission_control.adapters.postgres.run_control.stop_fence import PostgresStopFenceRepository
 from mission_control.adapters.storage.control_plane_payloads import UnavailablePayloadStore
 from mission_control.application.chains.service import ChainInspectionService
 from mission_control.application.coordinator.coordinator_facade import (
     CoordinatorLimits,
     ProductionCoordinatorFacade,
 )
+from mission_control.application.execution.approvals_governed import (
+    GovernedEffectService,
+    GovernedToolRegistry,
+)
 from mission_control.application.frames.search import TranscriptSearchService
 from mission_control.application.frames.transcript import TranscriptService
 from mission_control.application.human_tasks.service import HumanTaskService
+from mission_control.bootstrap.api import coordinator_inbox_installed
 from mission_control.bootstrap.catalog import compose_catalog_service
 from mission_control.bootstrap.coordinator_composition import (
     CoordinatorProductionDependencies,
@@ -40,6 +49,10 @@ from mission_control.bootstrap.coordinator_composition import (
 )
 from mission_control.bootstrap.manifests import compose_manifest_service
 from mission_control.bootstrap.settings import Settings, get_settings
+from mission_control.bootstrap.subscriptions import (
+    compose_coordinator_inbox_service,
+    compose_subscription_service,
+)
 from mission_control.contracts.identities import parse_request_scope
 from mission_control.domain.authoring.extensions import ExtensionRegistry
 from mission_control.interfaces.mcp.coordinator_server import (
@@ -47,8 +60,10 @@ from mission_control.interfaces.mcp.coordinator_server import (
     StaticPrincipalResolver,
     create_coordinator_server,
 )
+from mission_control.interfaces.mcp.governed_gateway import ScopedGovernedEffects
 from mission_control.interfaces.mcp.human_task_tools import ScopedHumanTasks
 from mission_control.interfaces.mcp.mission_tools import ScopedChains, ScopedManifests
+from mission_control.interfaces.mcp.subscriptions import McpSessionHub, McpSubscriptionBridge
 from mission_control.interfaces.mcp.transcript_tools import ScopedTranscripts
 
 
@@ -147,6 +162,8 @@ async def _serve(args: argparse.Namespace) -> None:
             chains=_chains(application_pool, principal.request_scope),
             manifests=_manifests(settings, application_pool, principal.request_scope),
             human_tasks=_human_tasks(application_pool, principal.request_scope),
+            governed=_governed(application_pool, principal.request_scope),
+            subscriptions=await _subscriptions(application_pool, principal.request_scope),
         )
         await server.run_http_async(
             transport="streamable-http",
@@ -192,8 +209,58 @@ def _human_tasks(application_pool: PostgresPool, request_scope: str) -> ScopedHu
     except ValueError:
         return None
     pool = cast(asyncpg.Pool, application_pool)
-    service = HumanTaskService(PostgresHumanTaskRepository(pool), request_scope=request_scope)
+    service = HumanTaskService(
+        PostgresHumanTaskRepository(pool),
+        request_scope=request_scope,
+        # MP-11: approval-origin tasks resolve through the same service.
+        approvals=PostgresApprovalTaskRepository(pool),
+    )
     return ScopedHumanTasks({request_scope: service})
+
+
+def _governed(application_pool: PostgresPool, request_scope: str) -> ScopedGovernedEffects | None:
+    """MP-11: prepare/review/execute for Mission-Control-owned tools. This development server
+    registers no governed tool, so the gateway governs nothing until one is composed."""
+
+    try:
+        parse_request_scope(request_scope)
+    except ValueError:
+        return None
+    pool = cast(asyncpg.Pool, application_pool)
+    approvals = PostgresApprovalTaskRepository(pool)
+    service = GovernedEffectService(
+        PostgresGovernedIntentRepository(pool),
+        approvals,
+        GovernedToolRegistry(),
+        request_scope=request_scope,
+        probe=PostgresApprovalContextProbe(pool),
+        fences=PostgresStopFenceRepository(pool),
+    )
+    return ScopedGovernedEffects({request_scope: service})
+
+
+async def _subscriptions(
+    application_pool: PostgresPool, request_scope: str
+) -> McpSubscriptionBridge | None:
+    """MP-15 (SPEC-04): durable subscriptions plus the coordinator inbox (poll/ack) where the
+    database has release 1.2.0. Prompting needs run control, which this server does not
+    compose; `stateless_http` sessions cannot receive live hints, so poll is the path."""
+
+    try:
+        parse_request_scope(request_scope)
+    except ValueError:
+        return None
+    pool = cast(asyncpg.Pool, application_pool)
+    inboxes = (
+        {request_scope: compose_coordinator_inbox_service(pool, request_scope)}
+        if await coordinator_inbox_installed(pool)
+        else None
+    )
+    return McpSubscriptionBridge(
+        {request_scope: compose_subscription_service(pool, request_scope)},
+        McpSessionHub(),
+        inboxes=inboxes,
+    )
 
 
 def _chains(application_pool: PostgresPool, request_scope: str) -> ScopedChains | None:

@@ -11,7 +11,7 @@ Baseline inspected: `7c9b755d75c4417ae364f33c340b9891446a391a`. This session cre
 
 ## Execution status
 
-This file records the planning session only. Implementation since 2026-10-08 is recorded in the team ledger (`.scratch/multi-provider-2026-10-08/team/LEDGER.md`), summarized per ticket with check results in the [implementation status](../../MISSION_CONTROL_IMPLEMENTATION_STATUS.md#multi-provider-packet-2026-10), and stated per profile in the [release statement](../../qualification/release/multi-provider-2026-10.md) (MP-23 pass 1, 2026-10-09; wave 3 not yet integrated).
+This file records the planning session only. Implementation since 2026-10-08 is recorded in the team ledger (`.scratch/multi-provider-2026-10-08/team/LEDGER.md`), summarized per ticket with check results in the [implementation status](../../MISSION_CONTROL_IMPLEMENTATION_STATUS.md#multi-provider-packet-2026-10), and stated per profile in the [release statement](../../qualification/release/multi-provider-2026-10.md) (MP-23 pass 2, 2026-10-10: all local lanes integrated uncommitted, no profile live-qualified, hosted parity blocked). The current session record and remaining work are in [HANDOFF-2026-10-10](HANDOFF-2026-10-10.md).
 
 ## Artifacts
 

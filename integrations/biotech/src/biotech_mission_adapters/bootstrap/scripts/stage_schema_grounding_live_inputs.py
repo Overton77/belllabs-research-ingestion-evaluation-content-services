@@ -11,11 +11,12 @@ from biotech_mission_adapters.adapters.infrastructure.schema_grounding_payloads 
     schema_grounding_input_store,
 )
 from biotech_mission_adapters.application.schema.schema_catalog import DEFAULT_SEMANTIC_OVERLAY
+from biotech_mission_adapters.bootstrap.schema_source import (
+    SCHEMA_SOURCE_ENV,
+    locate_authoritative_schema,
+)
 from mission_control.bootstrap.settings import PROJECT_ROOT, Settings
 
-DEFAULT_SCHEMA = (
-    PROJECT_ROOT.parent / "biotech-kg" / "src" / "schema" / "neo4jbiotechschema.graphql"
-)
 DEFAULT_REPORT = (
     PROJECT_ROOT.parent
     / "biotech-kg"
@@ -34,7 +35,12 @@ def _parser() -> argparse.ArgumentParser:
         )
     )
     parser.add_argument("--artifact-bucket", required=True)
-    parser.add_argument("--schema", type=Path, default=DEFAULT_SCHEMA)
+    parser.add_argument(
+        "--schema",
+        type=Path,
+        default=None,
+        help=f"default: the Biotech-owned SDL ({SCHEMA_SOURCE_ENV} or the BellLabs layout)",
+    )
     parser.add_argument("--semantic-overlay", type=Path, default=DEFAULT_SEMANTIC_OVERLAY)
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT)
     return parser
@@ -44,7 +50,7 @@ async def _run(args: argparse.Namespace) -> dict[str, object]:
     base = Settings()
     settings = base.model_copy(update={"s3_bucket": args.artifact_bucket})
     paths: dict[SchemaGroundingInputKind, Path] = {
-        "schema": args.schema.resolve(strict=True),
+        "schema": (args.schema or locate_authoritative_schema()).resolve(strict=True),
         "semantic_overlay": args.semantic_overlay.resolve(strict=True),
         "report": args.report.resolve(strict=True),
     }

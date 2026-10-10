@@ -16,9 +16,11 @@ manifest and the shared fail-closed installer. Administrative tooling only: the
 | `seeds/` | Seed bundle content | catalog lane |
 | `src/mission_control_db_contract/` | Installer, builder, snapshot, seed and runtime engines | DB lane |
 
-Status: release 1.0.0 is built (`component/manifest.json`, `generated/`) and pinned in
-`deployments/{biotech,ai-engineer}/release.lock.json`; it is installed in both live
-projects (2026-10-03). Any migration change requires a new component version, a new
+Status: release 1.0.0 is installed in both live projects (2026-10-03). Release 1.1.0
+(0001-0030) is built and pinned in `deployments/{biotech,ai-engineer}/release.lock.json`.
+The working tree builds release 1.2.0 (0001-0033, fingerprint `sha256:0113df03...`, declared
+predecessors 1.0.0 and the locked 1.1.0), proven only on disposable clusters; it is not locked
+or applied anywhere. Any migration change requires a new component version, a new
 `release-build` and new locks; applied migration bytes are never edited.
 
 ## Commands (exit 0 = passed, 2 = blocked gate; JSON on stdout, redacted)

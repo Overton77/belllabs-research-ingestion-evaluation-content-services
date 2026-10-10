@@ -68,7 +68,10 @@ def test_workspace_artifacts_verify_against_their_pins_when_present() -> None:
     if not directory.is_dir():
         pytest.skip("workspace Skill directory is not laid out beside this checkout")
     bundle = read_skill_bundle(directory)
-    assert bundle.bundle_digest == skill.bundle_digest
+    assert bundle.bundle_digest == skill.bundle_digest, (
+        f"host drift: {directory} no longer holds the pinned bytes; the worker fails closed "
+        "until the owner restores the pinned directory or authorizes a reviewed re-pin"
+    )
     assert skill.bundle().files == bundle.files
     tool = pins.tool("agent_browser_page")
     entrypoint = workspace_path(tool.entrypoint_locator)
@@ -84,7 +87,77 @@ def test_workspace_locators_cannot_escape_the_workspace() -> None:
     for locator in ("workspace://../secrets", "workspace:///etc/passwd", "file://x"):
         with pytest.raises(CapabilityPinError):
             workspace_path(locator)
-    assert workspace_path("workspace://.tools/x.js") == PROJECT_ROOT.parent / ".tools" / "x.js"
+    # `.tools` may be a declared, relocated resource root (a junction on the BellLabs host):
+    # the locator resolves to the real path beneath that root's target.
+    tools = (PROJECT_ROOT.parent / ".tools").resolve()
+    assert workspace_path("workspace://.tools/x.js") == tools / "x.js"
+
+
+def _link_directory(link: Path, target: Path) -> None:
+    """A directory link: a symlink where permitted, else a Windows junction."""
+
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except OSError:
+        import _winapi  # Windows only: junctions need no symlink privilege
+
+        _winapi.CreateJunction(str(target), str(link))
+
+
+@pytest.fixture
+def relocated_workspace(tmp_path: Path) -> tuple[Path, Path]:
+    """The BellLabs layout: `.agents`/`.tools` are links to the owning domain's directories."""
+
+    workspace = tmp_path / "platform"
+    workspace.mkdir()
+    owner = tmp_path / "biotech"
+    for name in (".agents", ".tools"):
+        (owner / name).mkdir(parents=True)
+        _link_directory(workspace / name, owner / name)
+    skill = owner / ".agents" / "skills" / "fixture"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_bytes(b"---\nname: fixture\ndescription: d\n---\n")
+    return workspace, owner
+
+
+def test_relocated_resource_roots_resolve_beneath_their_link_targets(
+    relocated_workspace: tuple[Path, Path],
+) -> None:
+    workspace, owner = relocated_workspace
+    skill = workspace_path("workspace://.agents/skills/fixture", root=workspace)
+    assert skill == (owner / ".agents" / "skills" / "fixture").resolve()
+    # The verified real path is readable by the link-refusing bundle reader.
+    assert dict(read_skill_bundle(skill).files) == {
+        "SKILL.md": b"---\nname: fixture\ndescription: d\n---\n"
+    }
+    module = workspace_path("workspace://.tools/node_modules/x/index.js", root=workspace)
+    assert module == (owner / ".tools").resolve() / "node_modules" / "x" / "index.js"
+
+
+def test_relocation_does_not_open_other_escapes(
+    relocated_workspace: tuple[Path, Path], tmp_path: Path
+) -> None:
+    workspace, owner = relocated_workspace
+    outside = tmp_path / "secrets"
+    outside.mkdir()
+    # A link nested beneath a resource root still cannot leave that root's target.
+    _link_directory(owner / ".agents" / "skills" / "escape", outside)
+    # An undeclared top-level link is not a resource root.
+    _link_directory(workspace / "biotech-kg", outside)
+    # A declared root linked to a directory of another name is refused.
+    renamed = tmp_path / "relocated-home"
+    (renamed / "skills" / "fixture").mkdir(parents=True)
+    other_workspace = tmp_path / "other" / "platform"
+    other_workspace.mkdir(parents=True)
+    _link_directory(other_workspace / ".agents", renamed)
+    for root, locator in (
+        (workspace, "workspace://.agents/skills/escape/key"),
+        (workspace, "workspace://biotech-kg/typedefs.graphql"),
+        (workspace, "workspace://.agents/../biotech-kg/x"),
+        (other_workspace, "workspace://.agents/skills/fixture"),
+    ):
+        with pytest.raises(CapabilityPinError, match="escapes or aliases"):
+            workspace_path(locator, root=root)
 
 
 @pytest.mark.asyncio

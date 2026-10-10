@@ -5,7 +5,11 @@
   is attached only when the caller declares it; the frozen manifest schema has no field for
   one, so a gate lowered from a manifest admits ``approve | deny`` until it does.
 - ``goal_human_review``: the review spec of a Goal Loop whose root acceptance (or a
-  criterion's) requires ``human``; remediation is the loop's own executor.
+  criterion's) requires ``human``; remediation is the loop's own executor. A Goal Loop root
+  cannot carry ``human_gate`` children, so mission/v1 has no field naming its reviewer: an
+  undeclared reviewer is the ``owner`` reviewer role (``DEFAULT_GOAL_REVIEWERS``), satisfied
+  only by the principal ``owner`` or a verified ``reviewer:owner`` grant. The review is never
+  dropped and never resolved by anyone else.
 - ``GateReservationSettlement``: a gate stage is admitted like any stage (the reducer owns
   admission and its reservation), but no cognition runs; its reservation is released whole
   against zero usage before the result is decided, as the baseline is (RRM-021).
@@ -35,6 +39,8 @@ from mission_control.domain.programs.human_gate import (
 )
 
 GOAL_REVIEW_GATE_KEY = "goal-review"
+# The reviewer role a Goal Loop's `acceptance.human` names when its manifest declares none.
+DEFAULT_GOAL_REVIEWERS: tuple[str, ...] = ("owner",)
 SETTLEMENT_ATTEMPTS = 4
 
 

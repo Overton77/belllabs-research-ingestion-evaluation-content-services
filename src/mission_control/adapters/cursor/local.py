@@ -19,8 +19,23 @@ One Session Turn of a bound operation, driven by `lane.turn` (FT-G2):
   stored.
 
 `reattach` re-launches the bridge over the same lease and `state_root` and resumes the agent
-(emulated: a turn the bridge store no longer knows raises `NativeTurnLost`). Qualification
-stays false until FT-G6 records a real run (`describe().qualified=False`).
+(emulated: a turn the bridge store no longer knows raises `NativeTurnLost`), re-supplying the
+options `Agent.resume` does not persist (tools, disallowed tools, inline MCP servers and
+subagents: `cursor_sdk` 1.0.37 `_async_client.resume_agent(agent_id, options)`) and recording
+what it re-applied in the handle (MP-09 option rehydration). Qualification stays false until
+FT-G6 / OVE-55 records a real run (`describe().qualified=False`).
+
+MP-09 host gate: the bridge is a subprocess, and the production worker pins a
+SelectorEventLoop on Windows, so `prepare` and `start` consult the launcher's `host_gate()`
+and refuse `LANE_UNSUPPORTED_OS` before leasing or spawning anything; the supported path is a
+WSL 2 or Linux worker (docs/qualification/lanes/cursor_local/README.md).
+
+MP-09 `reconcile_dispatch` (MP-06 `DispatchReconcilingLane`): the local SDK store exposes no
+lookup by idempotency key (`send(idempotency_key=...)` goes to the bridge and nothing reads it
+back), so a journaled send is `found` only when this process still holds the run it produced
+(a receipt lost between the bridge's answer and the journal write); after a process death
+the agent loop died with it and the lane answers `unknown`, which parks the unit `in_doubt`
+rather than guessing. A journaled create is `found` only from the same memory.
 
 FT-G4 controls (SPEC-07 section 7): cursors are turn-qualified (`<run_id>@<offset>`, so a
 replacement or continuation turn never resumes from another run's offset); a later turn's text
@@ -46,10 +61,12 @@ from uuid import UUID
 
 from mission_control.adapters.cursor import snapshot as snapshots
 from mission_control.adapters.cursor.bridge import (
+    LANE_UNSUPPORTED_OS,
     AgentBusy,
     CursorBridgeLauncher,
     CursorLocalBridge,
     FeatureUnavailable,
+    HostGate,
     LocalAgentSpec,
     RunNotCancellable,
     RunNotFound,
@@ -62,6 +79,7 @@ from mission_control.adapters.cursor.frames import (
     offset_of,
     run_of,
 )
+from mission_control.adapters.cursor.frames import first as first
 from mission_control.adapters.cursor.hooks_callback import kernel_hook_script
 from mission_control.adapters.cursor.projection import (
     HOOK_CONTEXT_PATH,
@@ -84,6 +102,7 @@ from mission_control.adapters.cursor.projection import (
 from mission_control.adapters.cursor.workspace import GitWorktreeLeaser
 from mission_control.application.execution.harness.controls import SessionHandover
 from mission_control.application.execution.harness.describe import CURSOR_LOCAL_DESCRIBE
+from mission_control.application.execution.harness.dispatch import DispatchLookup, DispatchRecord
 from mission_control.application.execution.harness.hook_callbacks import (
     HookCallbackService,
     HookTokenContext,
@@ -94,6 +113,7 @@ from mission_control.application.execution.harness.lane_turns import (
 )
 from mission_control.application.execution.harness.leases import WorkspaceLease
 from mission_control.application.execution.harness.protocol import NativeTurnLost
+from mission_control.application.execution.operations.lane_outputs import LaneOutputCustody
 from mission_control.domain.agentic_components.projection import HostProjection, ProjectedFile
 from mission_control.domain.authoring.canonical import sha256_digest
 from mission_control.domain.context.render import INPUTS_MANIFEST_PATH
@@ -164,6 +184,10 @@ class _Session:
     turn_texts: dict[str, str] = field(default_factory=dict)
     handover: SessionHandover | None = None
     restored_snapshot: str | None = None
+    # MP-09: the run each dispatch key produced in this process (the only reconcile anchor
+    # the local SDK offers) and what the last reattach re-applied.
+    sent_keys: dict[str, str] = field(default_factory=dict)
+    rehydrated: tuple[str, ...] = ()
 
 
 def _utc_now() -> datetime:
@@ -258,10 +282,13 @@ class CursorLocalHarness:
         describe: LaneDescribe = CURSOR_LOCAL_DESCRIBE,
         clock: Callable[[], datetime] = _utc_now,
         snapshot_store: snapshots.SnapshotArtifacts | None = None,
+        outputs: LaneOutputCustody | None = None,
     ) -> None:
         if describe.lane_profile != PROFILE:
             raise ValueError("the Cursor local harness describes the cursor_local profile")
         self._launcher = launcher
+        # MP-20: declared outputs become workspace candidates of the operation when composed.
+        self._outputs = outputs
         self._leaser = leaser
         self._projections = projections
         self._hooks = hooks
@@ -309,9 +336,22 @@ class CursorLocalHarness:
 
     # --- prepare ------------------------------------------------------------------------------
 
+    def host_gate(self) -> HostGate | None:
+        """The launcher's host gate (None for a launcher that spawns nothing, e.g. a replay)."""
+
+        gate = getattr(self._launcher, "host_gate", None)
+        return gate() if callable(gate) else None
+
+    def _refuse_unsupported_host(self) -> None:
+        gate = self.host_gate()
+        if gate is not None and not gate.supported:
+            raise LaneProjectionError(gate.code or LANE_UNSUPPORTED_OS, gate.message)
+
     async def prepare(self, request: PrepareRequest) -> PreparedSession:
         session = self._session(request)
         binding = session.binding
+        # Refused before any lease exists: a Windows worker cannot spawn the bridge.
+        self._refuse_unsupported_host()
         if binding.sandbox_enabled and not self._launcher.sandbox_supported():
             raise LaneProjectionError(
                 UNSUPPORTED_BEHAVIOR, "the Cursor sandbox is not available on this worker host"
@@ -421,6 +461,8 @@ class CursorLocalHarness:
         session = self._session(request)
         if session.lease is None:
             raise ValueError("start requires a prepared workspace lease")
+        # Enforced where the lane spawns (the launcher refuses as well).
+        self._refuse_unsupported_host()
         root = Path(session.lease.path)
         state_root = root / STATE_ROOT
         bridge = await self._launcher.launch(workspace=root, state_root=state_root)
@@ -435,16 +477,26 @@ class CursorLocalHarness:
 
     def _handle(self, request: HarnessRequest, agent_id: str, state_root: Path) -> SessionHandle:
         versions = self._launcher.versions
+        details = {
+            "cursor_sdk_version": versions.get("cursor_sdk", ""),
+            "bridge_state_root": str(state_root),
+        }
+        session = self._sessions.get(request.harness_execution_id)
+        if session is not None and session.rehydrated:
+            details["rehydrated"] = ",".join(session.rehydrated)
         return SessionHandle(
             lane_profile=PROFILE,
             harness_execution_id=request.harness_execution_id,
             generation=request.generation,
             native_session_ref=agent_id,
-            native_details={
-                "cursor_sdk_version": versions.get("cursor_sdk", ""),
-                "bridge_state_root": str(state_root),
-            },
+            native_details=details,
         )
+
+    def rehydration_receipt(self, harness_execution_id: str) -> tuple[str, ...]:
+        """Which non-persisted options the last reattach re-applied (empty when nothing was)."""
+
+        session = self._sessions.get(harness_execution_id)
+        return () if session is None else session.rehydrated
 
     async def _write_hook_context(
         self, session: _Session, request: HarnessRequest, agent_id: str
@@ -527,22 +579,54 @@ class CursorLocalHarness:
         bridge = await self._bridge(session, request)
         assert session.lease is not None
         root = Path(session.lease.path)
+        rehydrated = ["bridge"]
         if session.projection is None:
             session.projection = await self._projections.project(
                 session.operation, profile=PROFILE, packet_index=None
             )
+            rehydrated.append("projection")
+        spec = self._spec(session, root)
         try:
-            # Tools, disallowed tools and inline MCP servers are not persisted across resume.
-            agent_id = await bridge.resume_agent(
-                request.native_session_ref, self._spec(session, root)
-            )
+            # Tools, disallowed tools, inline MCP servers and subagents are not persisted
+            # across `Agent.resume`: the pinned spec is re-supplied on every resume
+            # (cursor_sdk 1.0.37 `_async_client.AsyncClient.resume_agent(agent_id, options)`).
+            agent_id = await bridge.resume_agent(request.native_session_ref, spec)
             if request.native_turn_ref is not None:
                 await bridge.run_state(request.native_turn_ref)
         except RunNotFound as error:
             raise NativeTurnLost("the bridge store no longer knows this session") from error
+        rehydrated.extend(_rehydrated_options(spec))
+        session.rehydrated = tuple(dict.fromkeys((*session.rehydrated, *rehydrated)))
         session.agent_id = agent_id
         session.run_id = request.native_turn_ref
         return self._handle(request, agent_id, root / STATE_ROOT)
+
+    # --- MP-06: reconcile an ambiguous create/send ------------------------------------------------
+
+    async def reconcile_dispatch(
+        self, record: DispatchRecord, *, session: SessionHandle | None
+    ) -> DispatchLookup:
+        """`found` only from what this process still holds; the local SDK offers no
+        idempotency read-back, and a process death kills the agent loop with the run."""
+
+        harness_execution_id = record.idempotency_key.split(":", 1)[0]
+        staged = self._sessions.get(harness_execution_id)
+        if record.kind == "create":
+            if staged is not None and staged.agent_id is not None and staged.bridge is not None:
+                return DispatchLookup(outcome="found", native_ref=staged.agent_id)
+            return DispatchLookup(
+                outcome="unknown",
+                detail="the local bridge store exposes no lookup of a create by key",
+            )
+        if staged is not None:
+            remembered = staged.sent_keys.get(record.idempotency_key)
+            if remembered is not None:
+                return DispatchLookup(outcome="found", native_ref=remembered)
+        return DispatchLookup(
+            outcome="unknown",
+            detail="the local SDK store exposes no lookup of a send by idempotency key; "
+            "a process death ended the agent loop with it",
+        )
 
     # --- turn ---------------------------------------------------------------------------------
 
@@ -562,6 +646,7 @@ class CursorLocalHarness:
         except AgentBusy:
             return TurnHandle(session=request.session, turn_no=request.turn_no, status="busy")
         session.run_id = run_id
+        session.sent_keys[request.idempotency_key] = run_id
         return TurnHandle(session=request.session, turn_no=request.turn_no, native_turn_ref=run_id)
 
     def stage_turn(self, harness_execution_id: str, instruction_ref: str, text: str) -> None:
@@ -627,6 +712,15 @@ class CursorLocalHarness:
         declared = declared_outputs(session.operation, mount_root=self._settings.mount_root)
         missing = missing_outputs(Path(session.lease.path), declared)
         return facts.model_copy(update={"missing_outputs": missing}) if missing else facts
+
+    def final_text(self, turn: TurnHandle, frame: LaneFrame) -> str | None:
+        """`FinalTextLane` (MP-20): the run's whole final text from the terminal frame body
+        (the closing facts keep only a bounded excerpt of it)."""
+
+        del turn
+        body = frame.body if isinstance(frame.body, Mapping) else {}
+        value = first(body, "result", "text")
+        return value if isinstance(value, str) else None
 
     def resume_cursor(self, provider_key: str) -> str | None:
         offset = offset_of(provider_key)
@@ -855,8 +949,16 @@ class CursorLocalHarness:
         patch_ref = frozen.manifest.patch.ref
         outputs: list[str] = [frozen.snapshot_ref]
         for path, content in await self._leaser.outputs(session.lease):
+            registered = (
+                await self._outputs.register(
+                    session.operation, path, content, mount_root=self._settings.mount_root
+                )
+                if self._outputs is not None
+                else None
+            )
             outputs.append(
-                await self._artifacts.stage(
+                registered
+                or await self._artifacts.stage(
                     request_scope=session.identity.request_scope,
                     name=f"cursor-local/{request.harness_execution_id}/{path}",
                     content=content,
@@ -882,6 +984,19 @@ class CursorLocalHarness:
         return CleanupReceipt(
             released=True, artifact_refs=(patch_ref, *outputs), patch_ref=patch_ref
         )
+
+
+def _rehydrated_options(spec: LocalAgentSpec) -> tuple[str, ...]:
+    """The non-persisted option groups a resume re-supplied (names only, never values)."""
+
+    applied = ["setting_sources", "mode", "sandbox"]
+    if spec.agents:
+        applied.append("agents")
+    if spec.disallowed_tools:
+        applied.append("disallowed_tools")
+    if spec.mcp_servers:
+        applied.append("mcp_servers")
+    return tuple(applied)
 
 
 __all__ = [

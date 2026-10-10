@@ -1,0 +1,9 @@
+{"_fixture": "codex/scripts/turn_full", "recorded": false, "note": "FIXTURE, not a live recording: hand-written from the pinned codex-cli 0.162.0 app-server v2 schema (tests/fixtures/provider_frames/codex/schema); replayed by tests/unit/codex/fixture_app_server.py, never by Codex"}
+{"step": "item", "item": {"type": "commandExecution", "id": "item-cmd-1", "command": "ls outputs", "cwd": "/fixture", "commandActions": [], "status": "completed", "exitCode": 0, "aggregatedOutput": "report.md\n"}}
+{"step": "delta", "item_id": "item-msg-1", "delta": "Writing the "}
+{"step": "delta", "item_id": "item-msg-1", "delta": "report now."}
+{"step": "item", "item": {"type": "agentMessage", "id": "item-msg-1", "text": "Wrote outputs/report.md as asked.", "phase": "final_answer"}}
+{"step": "notify", "method": "thread/prediction/updated", "params": {"prediction": {"kind": "fixture"}}}
+{"step": "notify", "method": "fixture/unmappedEvent", "params": {"note": "not in the pinned registry: must stay unknown"}}
+{"step": "usage", "input": 120, "output": 40}
+{"step": "complete", "status": "completed"}

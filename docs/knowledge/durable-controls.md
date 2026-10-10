@@ -59,9 +59,11 @@ The gate's outcome follows the resolution: `approved`, `answered`, `selected`,
 **Human Gate** runs as the `mc.human_gate.v1` control activation over the common Human Task rows,
 resolved through one `HumanTaskService` from HTTP, the `/missions` socket and MCP tools; the
 StageGraph gate stage and the GoalDirected review sit behind the `mp10-stagegraph-human-gate` and
-`mp10-goal-human-review` workflow patches. Detail, evidence and the open gaps (the production
-launch does not yet lower manifest gates) are in [Human Gates](human-gates.md). Event Wait, Timer
-and Proof Gate are still not program nodes. What else exists:
+`mp10-goal-human-review` workflow patches. The production launch lowers manifest gates (an
+undeclared Goal Loop reviewer is the `owner` role), a denied gate fails the run, and native
+provider approvals and governed effects open `approval:<origin>` tasks on the same service (MP-11).
+Detail, evidence and open gaps are in [Human Gates](human-gates.md). Event Wait, Timer and Proof
+Gate are still not program nodes. What else exists:
 
 - Run-level waits. `WaitCondition.kind` in
   `src/mission_control/domain/policies/contracts.py` is `dependency`, `timer`,
@@ -77,8 +79,9 @@ and Proof Gate are still not program nodes. What else exists:
   hold a typed request packet, `kind`, `assignee_scope`, `deadline_at`, `on_timeout`
   and a lifecycle check of `open | resolved | expired | cancelled`; a resolution
   stores the attributed `actor_ref`, the `answer` JSON with its digest and the
-  `expected_task_version`, exactly once per task. Three writers use them: the Human Gate
-  repository (`adapters/postgres/human_tasks/repository.py`, kind `human_gate:<KIND>`),
+  `expected_task_version`, exactly once per task. Four writers use them: the Human Gate
+  repository (`adapters/postgres/human_tasks/repository.py`, kind `human_gate:<KIND>`), the MP-11
+  approval task repository (`adapters/postgres/approvals/tasks.py`, kind `approval:<origin>`),
   `PostgresDecisionRepository` in
   `src/mission_control/adapters/postgres/runtime/stage3_kernel_repository.py`
   (kind prefix `runtime_decision:`) and `PostgresRedisApprovalGateway` in

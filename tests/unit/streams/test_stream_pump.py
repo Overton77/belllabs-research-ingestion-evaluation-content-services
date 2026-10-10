@@ -37,6 +37,7 @@ class Recorder:
         self.envelopes: list[StreamEnvelope] = []
         self.resyncs: list[dict[str, Any]] = []
         self.errors: list[StreamError] = []
+        self.lineages: list[dict[str, Any]] = []
         self.changed = asyncio.Event()
 
     async def envelope(self, envelope: StreamEnvelope) -> None:
@@ -49,6 +50,10 @@ class Recorder:
 
     async def error(self, error: StreamError) -> None:
         self.errors.append(error)
+        self.changed.set()
+
+    async def lineage(self, notice: dict[str, Any]) -> None:
+        self.lineages.append(notice)
         self.changed.set()
 
     def seqs(self) -> list[int]:

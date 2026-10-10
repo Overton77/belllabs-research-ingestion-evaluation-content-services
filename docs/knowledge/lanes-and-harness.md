@@ -1,7 +1,7 @@
 ---
 type: Concept
 title: Lanes and the harness protocol
-description: The provider-neutral AgentHarness protocol and lane registry, the seven lane profiles and their v1 and v2 describe matrices, the lane.turn segment loop that drives every lane, the Deep Agents lane behind it, the qualification flag, and the Agent Host configuration generator. Cursor profiles are in cursor-lane; session ownership, the dispatch journal and auth routes in session-ownership-and-dispatch.
+description: The provider-neutral AgentHarness protocol and lane registry, the seven lane profiles and their v1 and v2 describe matrices, the lane.turn segment loop that drives every Session Lane on its binding's task queue, attempt recording and output custody, the Deep Agents lane behind it and the qualification flag. Cursor profiles are in cursor-lane, Claude and Codex in provider-lanes; session ownership, the dispatch journal and auth routes in session-ownership-and-dispatch.
 tags: [mission-control, harness, lanes, deep-agents, agent-host, implementation]
 ---
 
@@ -31,11 +31,13 @@ one profile vocabulary, seven values: `deep_agents`, `cursor_local`, `cursor_clo
 `claude_agent_sdk`, `codex`, `claude_cloud` and `codex_cloud`.
 
 `application/execution/harness/describe.py` holds the declared matrix of each profile in
-`DECLARED_LANE_MATRICES`: the three FT-G1 profiles keep their `mc.lane_describe.v1` digests; the
-four MP-01 profiles are `mc.lane_describe.v2` stubs whose every control and feature is
-`unqualified` (design intent from the research, not proof), and the two hosted stubs declare
-`unsupported` delivery semantics from the feasibility studies (`cancel`, `pause` and `fork`
-among them). Each control is
+`DECLARED_LANE_MATRICES` (adapter `describe.py` modules only re-export): `deep_agents` keeps its
+digest-stable `mc.lane_describe.v1` matrix (`V1_LANE_PROFILES`); `cursor_local`, `cursor_cloud`,
+`claude_agent_sdk` and `codex` have implemented `mc.lane_describe.v2` matrices with per-feature
+evidence (`V2_IMPLEMENTED_LANE_PROFILES`); `claude_cloud` and `codex_cloud` are v2 stubs whose
+every control is `unqualified` (`V2_STUB_LANE_PROFILES`). Convention since the 2026-10-09
+recovery: an implemented cell says how it is supported (`native` or `emulated`) with
+`qualified=False`; `unqualified` only where nothing is implemented. Each control is
 `native`, `emulated`, `unsupported` or `unqualified`, with per-command delivery
 semantics, identity map, hook mechanism and events, instruction channels, subagent form,
 usage dispositions and placement. `GET /v1/applications/{app}/lanes[/{profile}]`
@@ -45,20 +47,21 @@ usage dispositions and placement. `GET /v1/applications/{app}/lanes[/{profile}]`
 
 `application/execution/harness/registry.py::LaneRegistry` maps a profile to its harness
 and caches describes. The worker composition (`adapters/temporal/deployment_composition.py`)
-registers `deep_agents` always and the two Cursor profiles only when `CURSOR_API_KEY` is
-bound (`registered_lane_profiles`); no harness exists for the four v2 profiles on the integrated
-base. The API registers describe-only entries (`describe_only_registry`) so `lane list` works
-without executing; a v2 stub appears only when its lane is marked bound, and `bootstrap/api.py`
-marks only Cursor (from `CURSOR_API_KEY`), so the API lists at most the three v1 profiles today.
+registers `deep_agents` always, the two Cursor profiles when `CURSOR_API_KEY` is bound, and
+`claude_agent_sdk` / `codex` when their opt-in and an auth profiles path are set on a non-Windows
+worker (`registered_lane_profiles`, `compose_lane_registry(claude_local=, codex_local=)`;
+[provider lanes](provider-lanes.md)). No harness exists for `claude_cloud` or `codex_cloud`. The
+API registers describe-only entries (`describe_only_registry(claude_bound=, codex_bound=)`) so
+`lane list` works without executing.
 Admission refuses a profile whose describe is not `qualified` unless policy allows
 unqualified lanes (`MISSION_CONTROL_ALLOW_UNQUALIFIED_LANES`, a local-proof flag), and
 the refusal names that remedy. Only `deep_agents` is `qualified=True` (WP-CP-040 parity
-suite). Both Cursor profiles are `qualified=False`: nothing but a reviewed release citing a
+suite). Every other profile is `qualified=False`: nothing but a reviewed release citing a
 live-drill record under `docs/qualification/lanes/` may flip that
 ([release-and-qualification](release-and-qualification.md)). Lane profile rows live in
-`mission_control.lane_profile`: migration 0030 seeded three, 0031 adds the four v2 stubs
-unqualified, generated from `DECLARED_LANE_MATRICES`. Per-profile status is in
-[qualification](qualification.md).
+`mission_control.lane_profile`: migration 0030 seeded three, 0031 adds four v2 stubs, and 0033
+regenerates the four implemented v2 rows from `DECLARED_LANE_MATRICES`, all unqualified. Per-profile
+status is in [qualification](qualification.md).
 
 ## One lifecycle synthesis: lane.turn
 
@@ -79,8 +82,14 @@ claims fenced session ownership, journals every native dispatch and admits it ag
 Fence, and a provider capacity limit becomes a bounded wait
 ([session ownership and dispatch](session-ownership-and-dispatch.md)).
 
-Cursor units always run through the segment loop (`OperationWorkflowRequest.segment_driven`,
-`adapters/temporal/workflows/operation.py`). Deep Agents units still run `operation.execute`
+Session Lane units (`SESSION_LANE_RUNTIMES = {cursor, claude, codex}`,
+`domain/execution/contracts.py`) always run through the segment loop with segment bounds from their
+own binding, and `lane.*` runs on the binding's task queue (`OperationWorkflowRequest.activity_task_queue`
+reads `provider_binding.task_queue`); a dedicated queue is served only when listed in
+`MISSION_CONTROL_LANE_TASK_QUEUES` (`adapters/temporal/worker.py`). Admission records the attempt
+row the frames hang off (`admit_lane_session(attempt=)`). A settlement carries the final JSON
+answer as the Completion Candidate and registers declared `outputs/` files as
+`workspace-candidate://` refs (`application/execution/operations/lane_outputs.py`). Deep Agents units still run `operation.execute`
 unless `MISSION_CONTROL_LANE_SEGMENT_LOOP=true`, which moves them onto `lane.turn` with the
 governed body unchanged (`OperationExecutionActivities.run_governed`); the default is
 `false` (`bootstrap/settings.py`). Replay histories of the lane activities are captured under
@@ -95,18 +104,16 @@ without changing behavior. Materialization, frames, hook middleware, compaction 
 hosted subordinates and the generated Agent Host configuration are in
 [Deep Agents lane](deep-agents-lane.md).
 
-## Not integrated or specified only
+## Other lanes and what is not built
 
-- Claude Agent SDK (MP-07) and Codex app-server (MP-08) harnesses and the Cursor parity work
-  (MP-09) are in flight in their own worktrees and not integrated; the base has their projections
-  (`application/agentic_components/projections.py`), frame mappings
-  (`application/frames/provider_mapping.py`) and auth routes, all fixture-proven only.
-- `claude_cloud` and `codex_cloud` are Outcome 3: the hosted products lack documented lifecycle
-  operations ([claude_cloud](../qualification/lanes/claude_cloud/FEASIBILITY.md),
-  [codex_cloud](../qualification/lanes/codex_cloud/FEASIBILITY.md)); the environment resolver
-  (`application/environments/resolver.py`) and the workspace allocator refuse them.
-- Direct Model lanes. The production launch author binds `deep_agents` only
-  ([mission manifest](mission-manifest.md)).
+- Cursor: [cursor lane](cursor-lane.md). Claude Agent SDK and Codex: [provider lanes](provider-lanes.md).
+  The production launch author seals bindings for all five local profiles
+  ([mission manifest](mission-manifest.md)); none is live-qualified.
+- `claude_cloud` and `codex_cloud` are Outcome 3, revalidated 2026-10-09: the hosted products lack
+  documented lifecycle operations ([claude_cloud](../qualification/lanes/claude_cloud/REVALIDATION-2026-10-09.md),
+  [codex_cloud](../qualification/lanes/codex_cloud/REVALIDATION-2026-10-09.md)); the environment
+  resolver (`application/environments/resolver.py`), the workspace allocator and launch refuse them.
+- Direct Model lanes are not built.
 
 # Citations
 
@@ -130,7 +137,9 @@ hosted subordinates and the generated Agent Host configuration are in
   [lane activities](../../src/mission_control/adapters/temporal/activities/lane_turn.py),
   [lane state store](../../src/mission_control/adapters/postgres/lanes/execution_state.py),
   [lane routes](../../src/mission_control/interfaces/http/lanes.py),
-  [worker lane composition](../../src/mission_control/adapters/temporal/deployment_composition.py).
+  [worker lane composition](../../src/mission_control/adapters/temporal/deployment_composition.py),
+  [lane task queue workers](../../src/mission_control/adapters/temporal/worker.py),
+  [lane outputs](../../src/mission_control/application/execution/operations/lane_outputs.py).
 - Tests: [lane contracts](../../tests/unit/harness/test_lane_contracts.py),
   [multi-provider contracts](../../tests/unit/harness/test_multi_provider_contracts.py),
   [registry](../../tests/unit/harness/test_lane_registry.py),
@@ -141,4 +150,7 @@ hosted subordinates and the generated Agent Host configuration are in
   [lane bindings in PostgreSQL](../../tests/integration/postgres/test_lane_bindings.py),
   [lane turn on Temporal](../../tests/integration/temporal/test_lane_turn.py),
   [lane replay histories](../../tests/integration/temporal/test_lane_replay_histories.py),
-  [segment loop acceptance](../../tests/acceptance/mission_control/test_ft_g2_segment_loop.py).
+  [segment loop acceptance](../../tests/acceptance/mission_control/test_ft_g2_segment_loop.py),
+  [Session Lane routing](../../tests/unit/operations/test_session_lane_routing.py),
+  [lane task queue workers](../../tests/unit/runtime/test_lane_task_queue_workers.py),
+  [lane final text](../../tests/unit/harness/test_lane_final_text.py).

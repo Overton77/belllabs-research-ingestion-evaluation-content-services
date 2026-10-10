@@ -48,6 +48,15 @@ from mission_control.domain.authoring.manifest import (
     manifest_digest,
     resolve_mission,
 )
+from mission_control.domain.authoring.manifest_v2 import (
+    AuthSelection,
+    ContinuationPolicy,
+    EnvironmentV2,
+    ExecutionEnvironmentSelection,
+    RequiredFeatures,
+    WorkspacePolicy,
+    WorkspaceSelectionV2,
+)
 
 MISSION_DEFINITION_SCHEMA_VERSION: Final = "mc.mission_definition.v1"
 
@@ -169,6 +178,50 @@ class DefinitionOutput(DefinitionContract):
     required: bool
 
 
+ENVIRONMENT_SELECTIONS_SCHEMA_VERSION: Final = "mc.environment_selections.v1"
+
+
+class EnvironmentSelections(DefinitionContract):
+    """The resolved ``mission/v2`` selections of one node role's effective Environment.
+
+    ``DefinitionNode.environment`` is declared as the v1 Environment, so a committed
+    definition stores (and digests) only its v1 fields; the v2 selections travel here, beside
+    it, so the launch author reads exactly what compile admitted. Absent on every
+    ``mission/v1`` definition (left out of dumps and digests: v1 digests are unchanged).
+    """
+
+    schema_version: Literal["mc.environment_selections.v1"] = ENVIRONMENT_SELECTIONS_SCHEMA_VERSION
+    auth: AuthSelection | None = None
+    execution_environment: ExecutionEnvironmentSelection | None = None
+    workspace_policy: WorkspacePolicy | None = None
+    continuation: ContinuationPolicy | None = None
+    requires: RequiredFeatures | None = None
+
+    @classmethod
+    def of(cls, environment: Environment) -> EnvironmentSelections | None:
+        if not isinstance(environment, EnvironmentV2):
+            return None
+        workspace = environment.workspace
+        return cls(
+            auth=environment.auth,
+            execution_environment=environment.execution_environment,
+            workspace_policy=workspace.policy
+            if isinstance(workspace, WorkspaceSelectionV2)
+            else None,
+            continuation=environment.continuation,
+            requires=environment.requires,
+        )
+
+
+def _absent(value: object) -> bool:
+    return value is None
+
+
+# An additive field: left out of dumps (`exclude_if`) and of the canonical digests
+# (`digest_omit_default`) while it holds its default, so every v1 definition keeps its bytes.
+_ADDITIVE: Final[dict[str, Any]] = {"digest_omit_default": True}
+
+
 class DefinitionNode(DefinitionContract):
     key: str
     behavior: Behavior
@@ -185,6 +238,13 @@ class DefinitionNode(DefinitionContract):
     completion: AcceptanceExpression | None = None
     body: dict[str, Any] = Field(default_factory=dict)
     nodes: tuple[DefinitionNode, ...] = ()
+    # mission/v2 (MP-01/MP-02): the node's and its verifier's v2 environment selections.
+    selections: EnvironmentSelections | None = Field(
+        default=None, exclude_if=_absent, json_schema_extra=_ADDITIVE
+    )
+    verifier_selections: EnvironmentSelections | None = Field(
+        default=None, exclude_if=_absent, json_schema_extra=_ADDITIVE
+    )
 
 
 # --- Policies, budget, completion --------------------------------------------------------
@@ -422,6 +482,12 @@ def _lower_node(
         completion=completion,
         body=body,
         nodes=children,
+        selections=EnvironmentSelections.of(resolved.effective_environment),
+        verifier_selections=(
+            EnvironmentSelections.of(verifier.effective_environment)
+            if verifier is not None
+            else None
+        ),
     )
 
 

@@ -129,3 +129,38 @@ Documentation only: nothing here is live proof, and no `qualified` flag or ADR s
   said the release locks pin 1.0.0 (they pin the committed 1.1.0 build; corrected);
   `docs/qualification/local-profiles/README.md` still says the cluster guard is not wired into
   `RunLaunchService` and cites the pre-0032 manifest digest (owned by MP-22, not edited).
+
+## 2026-10-10 (multi-provider packet, MP-23 pass 2)
+
+Reconciled the bundle with the 2026-10-09 recovery integration (MP-07, MP-08, MP-09, MP-11 and
+MP-12 ported; MP-15 and MP-20 finished; uncommitted on the local branch
+`mp/integration-recovery-2026-10-09`). Documentation only: no profile is live-qualified, no
+`qualified` flag or ADR status changed, and the hosted profiles stay Outcome 3.
+
+- Added [provider-lanes](provider-lanes.md) (the `claude_agent_sdk` and `codex` lanes: pinned
+  transports, opt-in Linux/WSL composition, broker-bound approvals, continuation, Codex native
+  compaction, owner-run drills). 34 concepts now.
+- Updated [lanes-and-harness](lanes-and-harness.md) (implemented v2 describes and the cell
+  convention, Session Lane routing on the binding's queue, lane task queues, attempt recording,
+  output custody), [cursor-lane](cursor-lane.md) (MP-09: v2 describes, `reconcile_dispatch`,
+  allocator-backed cloud lease and branch snapshots, run-branch publisher, host gate, Cursor launch
+  author), [human-gates](human-gates.md) (production lowering with the default `owner` Goal Loop
+  reviewer, denied gate fails the run, MP-11 approval-origin tasks, broker, governed effects,
+  approval resolution transports), [durable-controls](durable-controls.md),
+  [continuation-checkpoint](continuation-checkpoint.md) and
+  [context-and-continuation](context-and-continuation.md) (MP-12 production composition,
+  ADR-0041), [session-ownership-and-dispatch](session-ownership-and-dispatch.md) (attempt
+  recording, lane queues, which lanes reconcile and steer, the deployment's capacity policy),
+  [budgets-and-usage](budgets-and-usage.md) (Session Lane usage charging, capacity separate from
+  budget), [authoring](authoring.md) and [mission-chains](mission-chains.md) (v2 and Cursor
+  launch, Mission 2 status), [qualification](qualification.md) and
+  [release-and-qualification](release-and-qualification.md). Published release statement pass 2
+  and `docs/specs/multi-provider-2026-10/HANDOFF-2026-10-10.md`.
+- Corrected stale statements: "no harness exists for the four v2 profiles", "no production lane
+  implements `DispatchReconcilingLane` or `SteeringLane`", "`ContinuationService` is not composed",
+  "the production launch does not lower manifest gates", "`register_human_task_tools` has no served
+  caller", "`MISSION_CONTROL_CAPACITY_*` does not change a wait" and "the production launch author
+  binds `deep_agents` only".
+- Reported, not resolved here: the Cursor lane qualification READMEs still describe the v2
+  describe as a proposal; the MP-20 parity record lists gaps closed after it was written; the
+  remaining code follow-ups are listed in the handoff.

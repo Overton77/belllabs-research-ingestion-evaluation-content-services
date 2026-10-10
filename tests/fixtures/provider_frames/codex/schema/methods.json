@@ -1,0 +1,816 @@
+{
+  "client_requests": [
+    {
+      "method": "initialize",
+      "params": "#/definitions/InitializeParams"
+    },
+    {
+      "method": "thread/start",
+      "params": "#/definitions/ThreadStartParams"
+    },
+    {
+      "method": "thread/resume",
+      "params": "#/definitions/ThreadResumeParams"
+    },
+    {
+      "method": "thread/fork",
+      "params": "#/definitions/ThreadForkParams"
+    },
+    {
+      "method": "thread/archive",
+      "params": "#/definitions/ThreadArchiveParams"
+    },
+    {
+      "method": "thread/delete",
+      "params": "#/definitions/ThreadDeleteParams"
+    },
+    {
+      "method": "thread/unsubscribe",
+      "params": "#/definitions/ThreadUnsubscribeParams"
+    },
+    {
+      "method": "thread/name/set",
+      "params": "#/definitions/ThreadSetNameParams"
+    },
+    {
+      "method": "thread/goal/set",
+      "params": "#/definitions/ThreadGoalSetParams"
+    },
+    {
+      "method": "thread/goal/get",
+      "params": "#/definitions/ThreadGoalGetParams"
+    },
+    {
+      "method": "thread/goal/clear",
+      "params": "#/definitions/ThreadGoalClearParams"
+    },
+    {
+      "method": "thread/metadata/update",
+      "params": "#/definitions/ThreadMetadataUpdateParams"
+    },
+    {
+      "method": "thread/attachment/add",
+      "params": "#/definitions/ThreadAttachmentAddParams"
+    },
+    {
+      "method": "thread/attachment/list",
+      "params": "#/definitions/ThreadAttachmentListParams"
+    },
+    {
+      "method": "thread/attachmentOwner/list",
+      "params": "#/definitions/ThreadAttachmentOwnerListParams"
+    },
+    {
+      "method": "thread/attachment/remove",
+      "params": "#/definitions/ThreadAttachmentRemoveParams"
+    },
+    {
+      "method": "thread/section/move",
+      "params": "#/definitions/ThreadSectionMoveParams"
+    },
+    {
+      "method": "thread/unarchive",
+      "params": "#/definitions/ThreadUnarchiveParams"
+    },
+    {
+      "method": "thread/compact/start",
+      "params": "#/definitions/ThreadCompactStartParams"
+    },
+    {
+      "method": "thread/shellCommand",
+      "params": "#/definitions/ThreadShellCommandParams"
+    },
+    {
+      "method": "thread/approveGuardianDeniedAction",
+      "params": "#/definitions/ThreadApproveGuardianDeniedActionParams"
+    },
+    {
+      "method": "thread/revert",
+      "params": "#/definitions/ThreadRevertParams"
+    },
+    {
+      "method": "thread/list",
+      "params": "#/definitions/ThreadListParams"
+    },
+    {
+      "method": "threadSection/list",
+      "params": "#/definitions/ThreadSectionListParams"
+    },
+    {
+      "method": "threadSection/create",
+      "params": "#/definitions/ThreadSectionCreateParams"
+    },
+    {
+      "method": "threadSection/update",
+      "params": "#/definitions/ThreadSectionUpdateParams"
+    },
+    {
+      "method": "threadSection/delete",
+      "params": "#/definitions/ThreadSectionDeleteParams"
+    },
+    {
+      "method": "thread/loaded/list",
+      "params": "#/definitions/ThreadLoadedListParams"
+    },
+    {
+      "method": "thread/read",
+      "params": "#/definitions/ThreadReadParams"
+    },
+    {
+      "method": "thread/turns/list",
+      "params": "#/definitions/ThreadTurnsListParams"
+    },
+    {
+      "method": "thread/items/list",
+      "params": "#/definitions/ThreadItemsListParams"
+    },
+    {
+      "method": "thread/inject_items",
+      "params": "#/definitions/ThreadInjectItemsParams"
+    },
+    {
+      "method": "skills/list",
+      "params": "#/definitions/SkillsListParams"
+    },
+    {
+      "method": "skills/extraRoots/set",
+      "params": "#/definitions/SkillsExtraRootsSetParams"
+    },
+    {
+      "method": "hooks/list",
+      "params": "#/definitions/HooksListParams"
+    },
+    {
+      "method": "marketplace/add",
+      "params": "#/definitions/MarketplaceAddParams"
+    },
+    {
+      "method": "marketplace/remove",
+      "params": "#/definitions/MarketplaceRemoveParams"
+    },
+    {
+      "method": "marketplace/upgrade",
+      "params": "#/definitions/MarketplaceUpgradeParams"
+    },
+    {
+      "method": "plugin/list",
+      "params": "#/definitions/PluginListParams"
+    },
+    {
+      "method": "plugin/installed",
+      "params": "#/definitions/PluginInstalledParams"
+    },
+    {
+      "method": "plugin/reconcile",
+      "params": "#/definitions/PluginReconcileParams"
+    },
+    {
+      "method": "plugin/read",
+      "params": "#/definitions/PluginReadParams"
+    },
+    {
+      "method": "plugin/skill/read",
+      "params": "#/definitions/PluginSkillReadParams"
+    },
+    {
+      "method": "plugin/share/save",
+      "params": "#/definitions/PluginShareSaveParams"
+    },
+    {
+      "method": "plugin/share/updateTargets",
+      "params": "#/definitions/PluginShareUpdateTargetsParams"
+    },
+    {
+      "method": "plugin/share/list",
+      "params": "#/definitions/PluginShareListParams"
+    },
+    {
+      "method": "plugin/share/checkout",
+      "params": "#/definitions/PluginShareCheckoutParams"
+    },
+    {
+      "method": "plugin/share/delete",
+      "params": "#/definitions/PluginShareDeleteParams"
+    },
+    {
+      "method": "app/read",
+      "params": "#/definitions/AppsReadParams"
+    },
+    {
+      "method": "app/list",
+      "params": "#/definitions/AppsListParams"
+    },
+    {
+      "method": "app/installed",
+      "params": "#/definitions/AppsInstalledParams"
+    },
+    {
+      "method": "fs/readFile",
+      "params": "#/definitions/FsReadFileParams"
+    },
+    {
+      "method": "fs/writeFile",
+      "params": "#/definitions/FsWriteFileParams"
+    },
+    {
+      "method": "fs/createDirectory",
+      "params": "#/definitions/FsCreateDirectoryParams"
+    },
+    {
+      "method": "fs/getMetadata",
+      "params": "#/definitions/FsGetMetadataParams"
+    },
+    {
+      "method": "fs/readDirectory",
+      "params": "#/definitions/FsReadDirectoryParams"
+    },
+    {
+      "method": "fs/remove",
+      "params": "#/definitions/FsRemoveParams"
+    },
+    {
+      "method": "fs/copy",
+      "params": "#/definitions/FsCopyParams"
+    },
+    {
+      "method": "fs/watch",
+      "params": "#/definitions/FsWatchParams"
+    },
+    {
+      "method": "fs/unwatch",
+      "params": "#/definitions/FsUnwatchParams"
+    },
+    {
+      "method": "skills/config/write",
+      "params": "#/definitions/SkillsConfigWriteParams"
+    },
+    {
+      "method": "plugin/install",
+      "params": "#/definitions/PluginInstallParams"
+    },
+    {
+      "method": "plugin/uninstall",
+      "params": "#/definitions/PluginUninstallParams"
+    },
+    {
+      "method": "turn/start",
+      "params": "#/definitions/TurnStartParams"
+    },
+    {
+      "method": "turn/steer",
+      "params": "#/definitions/TurnSteerParams"
+    },
+    {
+      "method": "turn/interrupt",
+      "params": "#/definitions/TurnInterruptParams"
+    },
+    {
+      "method": "review/start",
+      "params": "#/definitions/ReviewStartParams"
+    },
+    {
+      "method": "model/list",
+      "params": "#/definitions/ModelListParams"
+    },
+    {
+      "method": "account/gatewayOAuth/read",
+      "params": "null"
+    },
+    {
+      "method": "account/gatewayOAuth/login",
+      "params": "null"
+    },
+    {
+      "method": "account/gatewayOAuth/cancel",
+      "params": "null"
+    },
+    {
+      "method": "modelProvider/capabilities/read",
+      "params": "#/definitions/ModelProviderCapabilitiesReadParams"
+    },
+    {
+      "method": "experimentalFeature/list",
+      "params": "#/definitions/ExperimentalFeatureListParams"
+    },
+    {
+      "method": "permissionProfile/list",
+      "params": "#/definitions/PermissionProfileListParams"
+    },
+    {
+      "method": "experimentalFeature/enablement/set",
+      "params": "#/definitions/ExperimentalFeatureEnablementSetParams"
+    },
+    {
+      "method": "mcpServer/oauth/login",
+      "params": "#/definitions/McpServerOauthLoginParams"
+    },
+    {
+      "method": "config/mcpServer/reload",
+      "params": "null"
+    },
+    {
+      "method": "mcpServerStatus/list",
+      "params": "#/definitions/ListMcpServerStatusParams"
+    },
+    {
+      "method": "mcpServer/resource/read",
+      "params": "#/definitions/McpResourceReadParams"
+    },
+    {
+      "method": "mcpServer/tool/call",
+      "params": "#/definitions/McpServerToolCallParams"
+    },
+    {
+      "method": "windowsSandbox/setupStart",
+      "params": "#/definitions/WindowsSandboxSetupStartParams"
+    },
+    {
+      "method": "windowsSandbox/readiness",
+      "params": "null"
+    },
+    {
+      "method": "account/login/start",
+      "params": "#/definitions/LoginAccountParams"
+    },
+    {
+      "method": "account/login/cancel",
+      "params": "#/definitions/CancelLoginAccountParams"
+    },
+    {
+      "method": "account/logout",
+      "params": "null"
+    },
+    {
+      "method": "account/rateLimits/read",
+      "params": [
+        "#/definitions/GetAccountRateLimitsParams",
+        "null"
+      ]
+    },
+    {
+      "method": "account/rateLimitResetCredit/consume",
+      "params": "#/definitions/ConsumeAccountRateLimitResetCreditParams"
+    },
+    {
+      "method": "account/usage/read",
+      "params": [
+        "#/definitions/GetAccountTokenUsageParams",
+        "null"
+      ]
+    },
+    {
+      "method": "account/workspaceMessages/read",
+      "params": "null"
+    },
+    {
+      "method": "account/sendAddCreditsNudgeEmail",
+      "params": "#/definitions/SendAddCreditsNudgeEmailParams"
+    },
+    {
+      "method": "feedback/upload",
+      "params": "#/definitions/FeedbackUploadParams"
+    },
+    {
+      "method": "command/exec",
+      "params": "#/definitions/CommandExecParams"
+    },
+    {
+      "method": "command/exec/write",
+      "params": "#/definitions/CommandExecWriteParams"
+    },
+    {
+      "method": "command/exec/terminate",
+      "params": "#/definitions/CommandExecTerminateParams"
+    },
+    {
+      "method": "command/exec/resize",
+      "params": "#/definitions/CommandExecResizeParams"
+    },
+    {
+      "method": "config/read",
+      "params": "#/definitions/ConfigReadParams"
+    },
+    {
+      "method": "externalAgentConfig/detect",
+      "params": "#/definitions/ExternalAgentConfigDetectParams"
+    },
+    {
+      "method": "externalAgentConfig/import",
+      "params": "#/definitions/ExternalAgentConfigImportParams"
+    },
+    {
+      "method": "externalAgentConfig/import/recordHistory",
+      "params": "#/definitions/ExternalAgentConfigImportHistoryRecordParams"
+    },
+    {
+      "method": "externalAgentConfig/import/readHistories",
+      "params": "null"
+    },
+    {
+      "method": "config/value/write",
+      "params": "#/definitions/ConfigValueWriteParams"
+    },
+    {
+      "method": "config/batchWrite",
+      "params": "#/definitions/ConfigBatchWriteParams"
+    },
+    {
+      "method": "configRequirements/read",
+      "params": "null"
+    },
+    {
+      "method": "account/read",
+      "params": "#/definitions/GetAccountParams"
+    },
+    {
+      "method": "fuzzyFileSearch",
+      "params": "#/definitions/FuzzyFileSearchParams"
+    }
+  ],
+  "server_requests": [
+    {
+      "method": "item/commandExecution/requestApproval",
+      "params": "#/definitions/CommandExecutionRequestApprovalParams"
+    },
+    {
+      "method": "item/fileChange/requestApproval",
+      "params": "#/definitions/FileChangeRequestApprovalParams"
+    },
+    {
+      "method": "item/tool/requestUserInput",
+      "params": "#/definitions/ToolRequestUserInputParams"
+    },
+    {
+      "method": "mcpServer/elicitation/request",
+      "params": "#/definitions/McpServerElicitationRequestParams"
+    },
+    {
+      "method": "item/permissions/requestApproval",
+      "params": "#/definitions/PermissionsRequestApprovalParams"
+    },
+    {
+      "method": "item/tool/call",
+      "params": "#/definitions/DynamicToolCallParams"
+    },
+    {
+      "method": "account/chatgptAuthTokens/refresh",
+      "params": "#/definitions/ChatgptAuthTokensRefreshParams"
+    },
+    {
+      "method": "attestation/generate",
+      "params": "#/definitions/AttestationGenerateParams"
+    },
+    {
+      "method": "applyPatchApproval",
+      "params": "#/definitions/ApplyPatchApprovalParams"
+    },
+    {
+      "method": "execCommandApproval",
+      "params": "#/definitions/ExecCommandApprovalParams"
+    }
+  ],
+  "server_notifications": [
+    {
+      "method": "error",
+      "params": "#/definitions/ErrorNotification"
+    },
+    {
+      "method": "thread/started",
+      "params": "#/definitions/ThreadStartedNotification"
+    },
+    {
+      "method": "thread/status/changed",
+      "params": "#/definitions/ThreadStatusChangedNotification"
+    },
+    {
+      "method": "thread/archived",
+      "params": "#/definitions/ThreadArchivedNotification"
+    },
+    {
+      "method": "thread/deleted",
+      "params": "#/definitions/ThreadDeletedNotification"
+    },
+    {
+      "method": "thread/unarchived",
+      "params": "#/definitions/ThreadUnarchivedNotification"
+    },
+    {
+      "method": "thread/closed",
+      "params": "#/definitions/ThreadClosedNotification"
+    },
+    {
+      "method": "thread/reverted",
+      "params": "#/definitions/ThreadRevertedNotification"
+    },
+    {
+      "method": "skills/changed",
+      "params": "#/definitions/SkillsChangedNotification"
+    },
+    {
+      "method": "thread/name/updated",
+      "params": "#/definitions/ThreadNameUpdatedNotification"
+    },
+    {
+      "method": "thread/attachment/updated",
+      "params": "#/definitions/ThreadAttachmentUpdatedNotification"
+    },
+    {
+      "method": "thread/goal/updated",
+      "params": "#/definitions/ThreadGoalUpdatedNotification"
+    },
+    {
+      "method": "thread/prediction/updated",
+      "params": "#/definitions/ThreadPredictionUpdatedNotification"
+    },
+    {
+      "method": "thread/goal/cleared",
+      "params": "#/definitions/ThreadGoalClearedNotification"
+    },
+    {
+      "method": "thread/queue/changed",
+      "params": "#/definitions/ThreadQueueChangedNotification"
+    },
+    {
+      "method": "project/changed",
+      "params": "#/definitions/ProjectChangedNotification"
+    },
+    {
+      "method": "thread/project/updated",
+      "params": "#/definitions/ThreadProjectUpdatedNotification"
+    },
+    {
+      "method": "thread/environment/connected",
+      "params": "#/definitions/EnvironmentConnectionNotification"
+    },
+    {
+      "method": "thread/environment/disconnected",
+      "params": "#/definitions/EnvironmentConnectionNotification"
+    },
+    {
+      "method": "thread/settings/updated",
+      "params": "#/definitions/ThreadSettingsUpdatedNotification"
+    },
+    {
+      "method": "thread/tokenUsage/updated",
+      "params": "#/definitions/ThreadTokenUsageUpdatedNotification"
+    },
+    {
+      "method": "turn/started",
+      "params": "#/definitions/TurnStartedNotification"
+    },
+    {
+      "method": "hook/started",
+      "params": "#/definitions/HookStartedNotification"
+    },
+    {
+      "method": "turn/completed",
+      "params": "#/definitions/TurnCompletedNotification"
+    },
+    {
+      "method": "hook/completed",
+      "params": "#/definitions/HookCompletedNotification"
+    },
+    {
+      "method": "turn/diff/updated",
+      "params": "#/definitions/TurnDiffUpdatedNotification"
+    },
+    {
+      "method": "turn/plan/updated",
+      "params": "#/definitions/TurnPlanUpdatedNotification"
+    },
+    {
+      "method": "item/started",
+      "params": "#/definitions/ItemStartedNotification"
+    },
+    {
+      "method": "item/autoApprovalReview/started",
+      "params": "#/definitions/ItemGuardianApprovalReviewStartedNotification"
+    },
+    {
+      "method": "item/autoApprovalReview/completed",
+      "params": "#/definitions/ItemGuardianApprovalReviewCompletedNotification"
+    },
+    {
+      "method": "autoApprovalReview/strictReviewRequired",
+      "params": "#/definitions/StrictReviewRequiredNotification"
+    },
+    {
+      "method": "item/completed",
+      "params": "#/definitions/ItemCompletedNotification"
+    },
+    {
+      "method": "item/agentMessage/delta",
+      "params": "#/definitions/AgentMessageDeltaNotification"
+    },
+    {
+      "method": "item/plan/delta",
+      "params": "#/definitions/PlanDeltaNotification"
+    },
+    {
+      "method": "command/exec/outputDelta",
+      "params": "#/definitions/CommandExecOutputDeltaNotification"
+    },
+    {
+      "method": "process/outputDelta",
+      "params": "#/definitions/ProcessOutputDeltaNotification"
+    },
+    {
+      "method": "process/exited",
+      "params": "#/definitions/ProcessExitedNotification"
+    },
+    {
+      "method": "item/commandExecution/outputDelta",
+      "params": "#/definitions/CommandExecutionOutputDeltaNotification"
+    },
+    {
+      "method": "item/commandExecution/terminalInteraction",
+      "params": "#/definitions/TerminalInteractionNotification"
+    },
+    {
+      "method": "item/fileChange/outputDelta",
+      "params": "#/definitions/FileChangeOutputDeltaNotification"
+    },
+    {
+      "method": "item/fileChange/patchUpdated",
+      "params": "#/definitions/FileChangePatchUpdatedNotification"
+    },
+    {
+      "method": "serverRequest/resolved",
+      "params": "#/definitions/ServerRequestResolvedNotification"
+    },
+    {
+      "method": "item/mcpToolCall/progress",
+      "params": "#/definitions/McpToolCallProgressNotification"
+    },
+    {
+      "method": "mcpServer/oauthLogin/completed",
+      "params": "#/definitions/McpServerOauthLoginCompletedNotification"
+    },
+    {
+      "method": "mcpServer/startupStatus/updated",
+      "params": "#/definitions/McpServerStatusUpdatedNotification"
+    },
+    {
+      "method": "mcpServer/event/stream/notification",
+      "params": "#/definitions/McpServerEventStreamNotification"
+    },
+    {
+      "method": "account/updated",
+      "params": "#/definitions/AccountUpdatedNotification"
+    },
+    {
+      "method": "account/gatewayOAuth/changed",
+      "params": "#/definitions/GatewayOAuthChangedNotification"
+    },
+    {
+      "method": "account/rateLimits/updated",
+      "params": "#/definitions/AccountRateLimitsUpdatedNotification"
+    },
+    {
+      "method": "app/list/updated",
+      "params": "#/definitions/AppListUpdatedNotification"
+    },
+    {
+      "method": "remoteControl/status/changed",
+      "params": "#/definitions/RemoteControlStatusChangedNotification"
+    },
+    {
+      "method": "externalAgentConfig/import/progress",
+      "params": "#/definitions/ExternalAgentConfigImportProgressNotification"
+    },
+    {
+      "method": "externalAgentConfig/import/completed",
+      "params": "#/definitions/ExternalAgentConfigImportCompletedNotification"
+    },
+    {
+      "method": "fs/changed",
+      "params": "#/definitions/FsChangedNotification"
+    },
+    {
+      "method": "item/reasoning/summaryTextDelta",
+      "params": "#/definitions/ReasoningSummaryTextDeltaNotification"
+    },
+    {
+      "method": "item/reasoning/summaryPartAdded",
+      "params": "#/definitions/ReasoningSummaryPartAddedNotification"
+    },
+    {
+      "method": "item/reasoning/textDelta",
+      "params": "#/definitions/ReasoningTextDeltaNotification"
+    },
+    {
+      "method": "thread/compacted",
+      "params": "#/definitions/ContextCompactedNotification"
+    },
+    {
+      "method": "model/rerouted",
+      "params": "#/definitions/ModelReroutedNotification"
+    },
+    {
+      "method": "model/verification",
+      "params": "#/definitions/ModelVerificationNotification"
+    },
+    {
+      "method": "modelProvider/authRecoveryStarted",
+      "params": "#/definitions/AuthRecoveryNotification"
+    },
+    {
+      "method": "modelProvider/authRecoveryCompleted",
+      "params": "#/definitions/AuthRecoveryNotification"
+    },
+    {
+      "method": "turn/moderationMetadata",
+      "params": "#/definitions/TurnModerationMetadataNotification"
+    },
+    {
+      "method": "model/safetyBuffering/updated",
+      "params": "#/definitions/ModelSafetyBufferingUpdatedNotification"
+    },
+    {
+      "method": "warning",
+      "params": "#/definitions/WarningNotification"
+    },
+    {
+      "method": "guardianWarning",
+      "params": "#/definitions/GuardianWarningNotification"
+    },
+    {
+      "method": "deprecationNotice",
+      "params": "#/definitions/DeprecationNoticeNotification"
+    },
+    {
+      "method": "configWarning",
+      "params": "#/definitions/ConfigWarningNotification"
+    },
+    {
+      "method": "fuzzyFileSearch/sessionUpdated",
+      "params": "#/definitions/FuzzyFileSearchSessionUpdatedNotification"
+    },
+    {
+      "method": "fuzzyFileSearch/sessionCompleted",
+      "params": "#/definitions/FuzzyFileSearchSessionCompletedNotification"
+    },
+    {
+      "method": "thread/realtime/started",
+      "params": "#/definitions/ThreadRealtimeStartedNotification"
+    },
+    {
+      "method": "thread/realtime/itemAdded",
+      "params": "#/definitions/ThreadRealtimeItemAddedNotification"
+    },
+    {
+      "method": "thread/realtime/item/started",
+      "params": "#/definitions/ThreadRealtimeItemStartedNotification"
+    },
+    {
+      "method": "thread/realtime/item/transcript/delta",
+      "params": "#/definitions/ThreadRealtimeItemTranscriptDeltaNotification"
+    },
+    {
+      "method": "thread/realtime/item/completed",
+      "params": "#/definitions/ThreadRealtimeItemCompletedNotification"
+    },
+    {
+      "method": "thread/realtime/transcript/delta",
+      "params": "#/definitions/ThreadRealtimeTranscriptDeltaNotification"
+    },
+    {
+      "method": "thread/realtime/transcript/done",
+      "params": "#/definitions/ThreadRealtimeTranscriptDoneNotification"
+    },
+    {
+      "method": "thread/realtime/outputAudio/delta",
+      "params": "#/definitions/ThreadRealtimeOutputAudioDeltaNotification"
+    },
+    {
+      "method": "thread/realtime/sdp",
+      "params": "#/definitions/ThreadRealtimeSdpNotification"
+    },
+    {
+      "method": "thread/realtime/error",
+      "params": "#/definitions/ThreadRealtimeErrorNotification"
+    },
+    {
+      "method": "thread/realtime/closed",
+      "params": "#/definitions/ThreadRealtimeClosedNotification"
+    },
+    {
+      "method": "windows/worldWritableWarning",
+      "params": "#/definitions/WindowsWorldWritableWarningNotification"
+    },
+    {
+      "method": "windowsSandbox/setupCompleted",
+      "params": "#/definitions/WindowsSandboxSetupCompletedNotification"
+    },
+    {
+      "method": "account/login/completed",
+      "params": "#/definitions/AccountLoginCompletedNotification"
+    }
+  ],
+  "client_notifications": [
+    {
+      "method": "initialized",
+      "params": null
+    }
+  ]
+}

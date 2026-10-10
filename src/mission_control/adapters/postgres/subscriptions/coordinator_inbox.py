@@ -1,4 +1,4 @@
-"""PostgreSQL coordinator inbox (MP-15) over 0029 subscriptions plus PROPOSED 0033 tables.
+"""PostgreSQL coordinator inbox (MP-15) over 0029 subscriptions plus the 0033 tables.
 
 Existing 0029 state is reused as is: the inbox's `mission_subscription` row (channel
 `stream_ticket`, `coordinator-inbox:<uuid>`) holds the target, the materialization cursor
@@ -6,12 +6,12 @@ Existing 0029 state is reused as is: the inbox's `mission_subscription` row (cha
 next attempt and dead-letter disposition; `subscription_delivery` holds the callback receipts
 keyed by each notification's anchor event.
 
-Three tables are new and are a **proposed** migration only (`PROPOSED_0033_DDL`, numbered by
-the integrator; no SQL file is written here). Tests apply that DDL to a disposable scratch
-database to prove this adapter. Every call runs in its own transaction under the
-transaction-local tenant scope (forced RLS). Materialization holds the inbox row lock for the
-whole page loop, so two passes never plan the same journal page, and notification upserts
-change only `open` rows: a sealed or suppressed notification is never rewritten.
+Three tables are new: `coordinator_inbox`, `coordinator_notification` and
+`coordinator_causation`, released in common migration 0033 (`RELEASED_MIGRATION`). Every call
+runs in its own transaction under the transaction-local tenant scope (forced RLS).
+Materialization holds the inbox row lock for the whole page loop, so two passes never plan the
+same journal page, and notification upserts change only `open` rows: a sealed or suppressed
+notification is never rewritten.
 """
 
 from __future__ import annotations
@@ -62,186 +62,13 @@ SCOPE = mc.SCOPE
 CALLBACK_ACTOR: Final = "system:coordinator-callback"
 _DELIVERY: TypeAdapter[Any] = TypeAdapter(InboxDelivery)
 
-# ---------------------------------------------------------------------------------------------
-# PROPOSED migration 0033 (MP-15). NOT a migration file and NOT allocated: the integrator owns
-# numbering and `packages/mission-control-db-contract/**`. Kept here verbatim so the adapter,
-# the PostgreSQL proof (`tests/integration/postgres/test_mp15_*`) and the handoff share one
-# text. Same conventions as 0029: composite tenant scope, forced RLS, no deletes, column-level
-# UPDATE grants for the runtime role, immutable causation records.
-# ---------------------------------------------------------------------------------------------
-PROPOSED_0033_DDL: Final = """
-CREATE TABLE mission_control.coordinator_inbox (
-    installation_id uuid NOT NULL,
-    application_id text NOT NULL,
-    tenant_id uuid NOT NULL,
-    subscription_id uuid PRIMARY KEY,
-    coordinator_ref text NOT NULL CHECK (coordinator_ref <> ''),
-    coordinator_run_ref text CHECK (coordinator_run_ref <> ''),
-    profile jsonb NOT NULL CHECK (jsonb_typeof(profile) = 'object'),
-    delivery_kind text NOT NULL CHECK (delivery_kind IN ('poll', 'mcp_session', 'webhook')),
-    delivery jsonb NOT NULL CHECK (jsonb_typeof(delivery) = 'object'
-        AND delivery->>'kind' = delivery_kind
-        AND NOT (delivery ?| ARRAY['secret', 'secret_value', 'password', 'token'])),
-    prompting boolean NOT NULL,
-    next_inbox_seq bigint NOT NULL CHECK (next_inbox_seq >= 1),
-    acked_inbox_seq bigint NOT NULL CHECK (acked_inbox_seq >= 0),
-    version bigint NOT NULL CHECK (version >= 1),
-    created_at timestamptz NOT NULL,
-    updated_at timestamptz NOT NULL,
-    created_by_actor_ref text NOT NULL CHECK (created_by_actor_ref <> ''),
-    CHECK (acked_inbox_seq < next_inbox_seq),
-    CHECK (NOT prompting OR coordinator_run_ref IS NOT NULL),
-    UNIQUE (installation_id, application_id, tenant_id, subscription_id),
-    FOREIGN KEY (installation_id, application_id, tenant_id)
-        REFERENCES mission_control.tenant (installation_id, application_id, tenant_id),
-    FOREIGN KEY (installation_id, application_id, tenant_id, subscription_id)
-        REFERENCES mission_control.mission_subscription
-            (installation_id, application_id, tenant_id, subscription_id)
-);
-
-CREATE TABLE mission_control.coordinator_notification (
-    installation_id uuid NOT NULL,
-    application_id text NOT NULL,
-    tenant_id uuid NOT NULL,
-    notification_id uuid PRIMARY KEY,
-    subscription_id uuid NOT NULL,
-    inbox_seq bigint CHECK (inbox_seq >= 1),
-    state text NOT NULL CHECK (state IN ('open', 'pending', 'acknowledged', 'suppressed')),
-    kind text NOT NULL CHECK (kind IN ('review_required', 'blocked', 'failed',
-        'terminal_result', 'accepted_output', 'child_lifecycle', 'review_closed', 'progress',
-        'rate_limited')),
-    actionable boolean NOT NULL,
-    mission_id uuid NOT NULL,
-    run_id uuid,
-    seq_from bigint NOT NULL CHECK (seq_from >= 1),
-    seq_to bigint NOT NULL,
-    event_count integer NOT NULL CHECK (event_count >= 1),
-    anchor_event_id uuid NOT NULL,
-    depth integer NOT NULL CHECK (depth >= 0),
-    suppressed_reason text CHECK (suppressed_reason IN ('recursion_bound', 'rate_folded')),
-    body jsonb NOT NULL CHECK (jsonb_typeof(body) = 'object'
-        AND body->>'schema_version' = 'mc.coordinator_notification.v1'),
-    opened_at timestamptz NOT NULL,
-    sealed_at timestamptz,
-    acknowledged_at timestamptz,
-    acknowledged_by_actor_ref text CHECK (acknowledged_by_actor_ref <> ''),
-    prompt_request_id uuid,
-    prompt_state text CHECK (prompt_state IN ('requested', 'admitted', 'skipped', 'failed')),
-    prompt_request jsonb,
-    prompt_detail text,
-    prompted_at timestamptz,
-    version bigint NOT NULL CHECK (version >= 1),
-    created_at timestamptz NOT NULL,
-    updated_at timestamptz NOT NULL,
-    created_by_actor_ref text NOT NULL CHECK (created_by_actor_ref <> ''),
-    CHECK (seq_to >= seq_from),
-    CHECK ((state IN ('pending', 'acknowledged')) = (inbox_seq IS NOT NULL)),
-    CHECK ((state = 'suppressed') = (suppressed_reason IS NOT NULL)),
-    CHECK ((state = 'acknowledged') = (acknowledged_at IS NOT NULL)),
-    CHECK (state = 'open' OR sealed_at IS NOT NULL),
-    CHECK (prompt_state IS NULL OR prompt_state = 'skipped' OR prompt_request_id IS NOT NULL),
-    UNIQUE (installation_id, application_id, tenant_id, notification_id),
-    UNIQUE (installation_id, application_id, tenant_id, subscription_id, inbox_seq),
-    FOREIGN KEY (installation_id, application_id, tenant_id)
-        REFERENCES mission_control.tenant (installation_id, application_id, tenant_id),
-    FOREIGN KEY (installation_id, application_id, tenant_id, subscription_id)
-        REFERENCES mission_control.coordinator_inbox
-            (installation_id, application_id, tenant_id, subscription_id),
-    FOREIGN KEY (installation_id, application_id, tenant_id, anchor_event_id)
-        REFERENCES mission_control.mission_event
-            (installation_id, application_id, tenant_id, event_id)
-);
-CREATE INDEX coordinator_notification_open_idx
-    ON mission_control.coordinator_notification
-        (installation_id, application_id, tenant_id, subscription_id)
-    WHERE state = 'open';
-CREATE INDEX coordinator_notification_pending_idx
-    ON mission_control.coordinator_notification
-        (installation_id, application_id, tenant_id, subscription_id, inbox_seq)
-    WHERE state = 'pending';
-CREATE INDEX coordinator_notification_sealed_idx
-    ON mission_control.coordinator_notification
-        (installation_id, application_id, tenant_id, subscription_id, run_id, sealed_at)
-    WHERE state IN ('pending', 'acknowledged');
-CREATE INDEX coordinator_notification_anchor_event_id_fk_idx
-    ON mission_control.coordinator_notification
-        (installation_id, application_id, tenant_id, anchor_event_id);
-
--- A command admitted because of a notification (prompt or triggered), by request id. The
--- events it causes carry `causation_ref = <request id>` and inherit `depth`. Immutable.
-CREATE TABLE mission_control.coordinator_causation (
-    installation_id uuid NOT NULL,
-    application_id text NOT NULL,
-    tenant_id uuid NOT NULL,
-    command_request_id uuid NOT NULL,
-    subscription_id uuid NOT NULL,
-    notification_id uuid NOT NULL,
-    origin text NOT NULL CHECK (origin IN ('prompt', 'triggered')),
-    target_run_ref text NOT NULL CHECK (target_run_ref <> ''),
-    depth integer NOT NULL CHECK (depth >= 1),
-    recorded_at timestamptz NOT NULL,
-    created_at timestamptz NOT NULL,
-    created_by_actor_ref text NOT NULL CHECK (created_by_actor_ref <> ''),
-    PRIMARY KEY (installation_id, application_id, tenant_id, command_request_id),
-    FOREIGN KEY (installation_id, application_id, tenant_id)
-        REFERENCES mission_control.tenant (installation_id, application_id, tenant_id),
-    FOREIGN KEY (installation_id, application_id, tenant_id, notification_id)
-        REFERENCES mission_control.coordinator_notification
-            (installation_id, application_id, tenant_id, notification_id)
-);
-CREATE INDEX coordinator_causation_window_idx
-    ON mission_control.coordinator_causation
-        (installation_id, application_id, tenant_id, subscription_id, origin, recorded_at);
-CREATE INDEX coordinator_causation_notification_id_fk_idx
-    ON mission_control.coordinator_causation
-        (installation_id, application_id, tenant_id, notification_id);
-
-CREATE TRIGGER coordinator_causation_immutable
-    BEFORE UPDATE OR DELETE ON mission_control.coordinator_causation
-    FOR EACH ROW EXECUTE FUNCTION mission_control.reject_mutation();
-CREATE TRIGGER coordinator_inbox_no_delete
-    BEFORE DELETE ON mission_control.coordinator_inbox
-    FOR EACH ROW EXECUTE FUNCTION mission_control.reject_mutation();
-CREATE TRIGGER coordinator_notification_no_delete
-    BEFORE DELETE ON mission_control.coordinator_notification
-    FOR EACH ROW EXECUTE FUNCTION mission_control.reject_mutation();
-
-DO $policies$
-DECLARE
-    table_name text;
-BEGIN
-    FOREACH table_name IN ARRAY ARRAY['coordinator_inbox', 'coordinator_notification',
-            'coordinator_causation'] LOOP
-        EXECUTE pg_catalog.format('ALTER TABLE mission_control.%I ENABLE ROW LEVEL SECURITY',
-            table_name);
-        EXECUTE pg_catalog.format('ALTER TABLE mission_control.%I FORCE ROW LEVEL SECURITY',
-            table_name);
-        EXECUTE pg_catalog.format(
-            'CREATE POLICY %I ON mission_control.%I '
-            'USING (installation_id = mission_control.ctx_installation_id() '
-            'AND application_id = mission_control.ctx_application_id() '
-            'AND tenant_id = mission_control.ctx_tenant_id()) '
-            'WITH CHECK (installation_id = mission_control.ctx_installation_id() '
-            'AND application_id = mission_control.ctx_application_id() '
-            'AND tenant_id = mission_control.ctx_tenant_id())',
-            table_name || '_scope', table_name);
-        EXECUTE pg_catalog.format('REVOKE ALL ON mission_control.%I FROM PUBLIC', table_name);
-        EXECUTE pg_catalog.format(
-            'GRANT SELECT ON mission_control.%I TO mission_control_readonly', table_name);
-        EXECUTE pg_catalog.format(
-            'GRANT SELECT, INSERT ON mission_control.%I TO mission_control_runtime', table_name);
-    END LOOP;
-END
-$policies$;
-
-GRANT UPDATE (next_inbox_seq, acked_inbox_seq, version, updated_at)
-ON mission_control.coordinator_inbox TO mission_control_runtime;
-GRANT UPDATE (inbox_seq, state, actionable, seq_from, seq_to, event_count, anchor_event_id,
-    depth, suppressed_reason, body, sealed_at, acknowledged_at, acknowledged_by_actor_ref,
-    prompt_request_id, prompt_state, prompt_request, prompt_detail, prompted_at, version,
-    updated_at)
-ON mission_control.coordinator_notification TO mission_control_runtime;
-"""
+# The three coordinator tables are released in common migration 0033 (component 1.2.0),
+# section 2 of packages/mission-control-db-contract/component/migrations/
+# 0033_approvals_coordinator_inbox_lane_describes.sql. That file is the only copy of the DDL.
+RELEASED_MIGRATION: Final = (
+    "packages/mission-control-db-contract/component/migrations/"
+    "0033_approvals_coordinator_inbox_lane_describes.sql"
+)
 
 _NOTIFICATION_COLUMNS = """
     n.notification_id, n.inbox_seq, n.state, n.suppressed_reason, n.body, n.sealed_at,
@@ -958,4 +785,4 @@ class PostgresCoordinatorInboxStore:
         return tuple([await store.get(subscription_id) for subscription_id in leased])
 
 
-__all__ = ["CALLBACK_ACTOR", "PROPOSED_0033_DDL", "PostgresCoordinatorInboxStore"]
+__all__ = ["CALLBACK_ACTOR", "RELEASED_MIGRATION", "PostgresCoordinatorInboxStore"]

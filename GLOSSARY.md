@@ -201,6 +201,14 @@ _Avoid_: permission callback, approval handle
 A Mission Control-owned tool effect that the governed MCP gateway admits in three steps: prepare without executing, review as a Human Task, execute the bound intent once.
 _Avoid_: gated tool, protected call
 
+**Approval Correlation**:
+One expiring native request handle bound to an approval Human Task, held by one worker connection; closed exactly once as answered, expired, superseded or lost, and never reused for a later request.
+_Avoid_: approval ledger, callback id
+
+**Governed Effect Intent**:
+The approval-bound, digest-pinned intent of a Mission Control-owned tool call; executed at most once into one immutable receipt, or settled denied, cancelled, expired, fenced, stale or in doubt.
+_Avoid_: approval ledger, pending call
+
 **Completion Candidate**:
 An executor's submitted claim that its activation is done, with evidence.
 

@@ -1,0 +1,71 @@
+# yaml-language-server: $schema=../../../../src/mission_control/contracts/schemas/mc.mission_manifest.v2.json
+# mission/v2 Stage Graph on the worker-hosted Cursor lane (cursor_local), with one Deep Agents
+# node mixed in. Checked example: compiled by tests/unit/authoring/test_manifest_cursor_launch.py
+# against the fast-track fixture catalog, and its launch templates authored against
+# deployments/examples/manifest-launch-bindings.multi-provider.example.json (providers.cursor_local):
+# each Cursor stage carries a sealed mc.cursor_binding.v1 routed to the lane's task queue.
+# Profile names (cursor.default, cursor-local-key, worker.linux.wsl) are deployment registry keys;
+# the bindings file resolves them and admits the repository path the worker leases worktrees
+# from. The manifest never names a model ID or a credential.
+manifest: mission/v2
+mission:
+  key: cursor-parser-fix
+  title: Fix the failing parser test (Cursor local)
+  application: ai-engineer
+  goals:
+    - key: patched
+      description: The failing parser test passes with a minimal, reviewed patch
+      objectives:
+        - { key: diagnose, description: Reproduce the failure and locate its cause }
+      criteria:
+        - key: patch_reported
+          description: The patch report names the change and the passing test command
+          evidence: [patch_report]
+          acceptance: { schema: patch_report@1 }
+  environment:
+    lane: cursor_local
+    model: { profile: cursor.default }
+    auth: { profile: cursor-local-key }
+    execution_environment: { kind: local_workspace, profile: worker.linux.wsl }
+    workspace:
+      repo: { url: "https://github.com/Overton77/mission-control-fixture", path: /srv/repos/mission-control-fixture, ref: main }
+      policy: { mode: managed_worktree, reuse: within_run, dirty_input: reject, cleanup: retain_until_artifacts_registered }
+    continuation: { max_session_turns: 12 }
+    # Mission-wide requirements every lane of this mission admits (Deep Agents included).
+    requires:
+      controls: [cancel]
+      approvals: [workflow_gate]
+      observation: [terminal_result]
+    budget: { tokens: 400000, wall_clock: 1h, tool_calls: 200 }
+    governors: { depth: 1, fan_out: 2, iterations: 4, patience: 2 }
+    side_effects: [read_only, workspace_write]
+  program:
+    key: root
+    behavior: stage_graph
+    objectives: [patched]
+    nodes:
+      - key: diagnose
+        behavior: agent_executor
+        objectives: [diagnose]
+        instruction: Reproduce the failing parser test and write a short diagnosis.
+        outputs: [ { name: diagnosis, schema: diagnosis_note@1 } ]
+      - key: patch
+        behavior: agent_executor
+        objectives: [patched]
+        depends_on: [diagnose]
+        inputs: [ { name: diagnosis, from: diagnose.diagnosis, expand: materialize } ]
+        instruction: Apply the smallest patch that makes the test pass and report it.
+        outputs: [ { name: patch_report, schema: patch_report@1 } ]
+      - key: summarize
+        behavior: agent_executor
+        objectives: [patched]
+        depends_on: [patch]
+        inputs: [ { name: patch_report, from: patch.patch_report, expand: reference } ]
+        instruction: Summarize the patch for the reviewer.
+        environment:
+          lane: deep_agents
+          model: { profile: frontier.default }
+          sandbox: { profile: research.standard }
+        outputs: [ { name: summary, schema: summary_note@1 } ]
+  controls:
+    commands_allowed: [pause, resume, cancel, queue_instruction]

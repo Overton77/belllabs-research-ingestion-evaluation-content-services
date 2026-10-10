@@ -9,7 +9,7 @@ from contextlib import suppress
 from contextvars import ContextVar
 from copy import deepcopy
 from datetime import UTC, datetime
-from typing import Literal, Protocol
+from typing import Final, Literal, Protocol, runtime_checkable
 
 from mission_control.application.authoring.service import ControlPlaneService
 from mission_control.application.execution.harness.deep_agents_harness import DeepAgentsHarness
@@ -38,6 +38,7 @@ from mission_control.application.execution.stop_fence import StopFenceRepository
 from mission_control.domain.authoring.canonical import contract_fingerprint, sha256_digest
 from mission_control.domain.authoring.contracts import DefinitionKind, SecretRef
 from mission_control.domain.authoring.identity import stable_id
+from mission_control.domain.context.refs import parse_workspace_candidate_ref
 from mission_control.domain.context.render import is_context_input_slot
 from mission_control.domain.execution.checkpoint_lineage import (
     CheckpointCapture,
@@ -73,10 +74,12 @@ from mission_control.domain.execution.errors import (
     UnsupportedRuntimePolicy,
 )
 from mission_control.domain.execution.journal import OperationClaimResult, OperationEffectClaim
-from mission_control.domain.execution.lane_turns import ClosingFacts
+from mission_control.domain.execution.lane_turns import MAX_EXCERPT_CHARS, ClosingFacts
 from mission_control.domain.graph_runtime.identities import QualifiedCheckpointKey
 from mission_control.domain.policies.contracts import (
     ActorContext,
+    BudgetApplicability,
+    BudgetState,
     CommandStatus,
     LifecycleCommand,
     RecordUsageAction,
@@ -92,6 +95,13 @@ from mission_control.domain.programs.runtime_units import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+MAX_COMPLETION_CANDIDATE_CHARS: Final = 262_144
+"""Bound on the final assistant text a Session Lane's Completion Candidate is parsed from; a
+longer final answer yields no candidate (fail closed, with a provenance warning)."""
+
+LANE_TOKEN_DIMENSIONS: Final = ("tokens.input", "tokens.output", "tokens.total")
+"""The run-budget dimensions a Session Lane settlement can charge from its closing usage."""
 
 # The lease deadline of the attempt holding the claim lease, so that a cancellation raised
 # by the deadline is told apart from a Temporal cancel delivered through the heartbeat.
@@ -161,6 +171,32 @@ class OperationAuthorityPort(Protocol):
         ...
 
 
+@runtime_checkable
+class RunBudgetDimensionsPort(Protocol):
+    """The budget dimensions the run's admitted envelope can be charged on (MP-20).
+
+    A Session Lane unit charges its settled/estimated token usage on these even when its own
+    reservation does not bound them (a Stage Graph stage reserves `operation.attempts` and
+    `concurrency.slots`, a Goal Loop iteration `goal.iterations`): the usage is a provider
+    fact recorded in full, the reservation is not widened and the run's hard caps gate the
+    next reservation. An authority without this port charges only reserved dimensions."""
+
+    async def charged_budget_dimensions(self, request_scope: str, run_id: str) -> frozenset[str]:
+        """The run's declared, applicable budget dimensions."""
+        ...
+
+
+def charged_dimensions(budget: BudgetState) -> frozenset[str]:
+    """A run budget's declared dimensions that usage may be recorded on (not `not_applicable`;
+    the reducer rejects usage on an undeclared or not-applicable dimension)."""
+
+    return frozenset(
+        item.dimension
+        for item in budget.limits
+        if item.applicability != BudgetApplicability.NOT_APPLICABLE
+    )
+
+
 class AsyncChildCancellationPort(Protocol):
     """REQ-CP-EXEC-008 step 4: cancel every active async child of a unit per its link
     policy and record the provider's acknowledgement or its absence."""
@@ -190,6 +226,11 @@ class RunControlOperationAuthority:
     def __init__(self, run_control: RunControlService, control_plane: ControlPlaneService) -> None:
         self._run_control = run_control
         self._control_plane = control_plane
+
+    async def charged_budget_dimensions(self, request_scope: str, run_id: str) -> frozenset[str]:
+        """`RunBudgetDimensionsPort`: the run's declared, applicable budget dimensions."""
+
+        return charged_dimensions(await self._run_control.get_budget(request_scope, run_id))
 
     async def verify(self, request: OperationExecutionRequest) -> None:
         run = await self._run_control.get_run(request.request_scope, request.identity.run_id)
@@ -383,7 +424,15 @@ class RunControlOperationBudgetAuthority:
         budget_violation: bool = False,
     ) -> None:
         if not budget_violation:
-            _validate_bound_usage(binding, usage)
+            unreserved: frozenset[str] = frozenset()
+            unbound = _unbound_dimensions(binding, usage)
+            if unbound and unbound <= frozenset(LANE_TOKEN_DIMENSIONS):
+                # MP-20: a Session Lane charges token usage on run dimensions its reservation
+                # does not bound; they must be the run's declared, applicable dimensions.
+                unreserved = frozenset(LANE_TOKEN_DIMENSIONS) & charged_dimensions(
+                    await self._run_control.get_budget(binding.request_scope, binding.run_id)
+                )
+            _validate_bound_usage(binding, usage, unreserved=unreserved)
         release_amounts = {
             dimension: limit
             - min(
@@ -864,7 +913,12 @@ class OperationExecutionService:
 
     # --- FT-G2: protocol lanes driven by `lane.turn` (SPEC-07 section 4.1) ------------------
 
-    async def admit_lane_session(self, request: OperationExecutionRequest) -> LaneSessionAdmission:
+    async def admit_lane_session(
+        self,
+        request: OperationExecutionRequest,
+        *,
+        attempt: OperationActivityAttempt | None = None,
+    ) -> LaneSessionAdmission:
         """Bind, authorize and claim a protocol-lane attempt before any provider work.
 
         A Session Lane (Cursor) keeps its provider session across `lane.turn` segments, so
@@ -899,6 +953,10 @@ class OperationExecutionService:
         await self._assets.verify(binding)
         await self._mcp.verify_servers(binding)
         await self._lane_claim(binding)
+        if self._lineage is not None and attempt is not None:
+            # A Session Lane's frames and harness execution hang off the unit's attempt row,
+            # which the governed `operation.execute` path records on its own admission.
+            await self._lineage.observe_attempt(binding, attempt, dispatching=True)
         return LaneSessionAdmission(binding, None)
 
     async def _lane_claim(self, binding: OperationExecutionBinding) -> OperationEffectClaim | None:
@@ -934,13 +992,19 @@ class OperationExecutionService:
         attempt: OperationActivityAttempt | None = None,
         native_turn_ref: str | None = None,
         cancelled_by_command: bool = False,
+        final_text: str | None = None,
     ) -> OperationExecutionResult:
         """Settle a protocol-lane attempt once from its closing facts (never from deltas).
 
         A provider `finished` completes the operation (acceptance stays with the Completion
         Contract); `error` and `expired` fail it; `cancelled` settles `cancelled` and, for a
-        command, records the Stop Fence milestones. Usage dimensions the binding bounds are
-        settled; the full lane usage and the closing facts travel in the event payload.
+        command, records the Stop Fence milestones. Token usage is charged on the dimensions
+        the binding bounds and (MP-20) on the run's declared token dimensions the unit's
+        reservation does not bound; `unknown` usage charges nothing. The full lane usage and
+        the closing facts travel in the event payload.
+
+        `final_text` is the lane's full final assistant text (never an excerpt); the
+        Completion Candidate is parsed from it (see `lane_final_text`).
         """
 
         binding = await self._bindings.get_binding(
@@ -957,14 +1021,17 @@ class OperationExecutionService:
         claim = await self._lane_claim(binding)
         if cancelled_by_command:
             await self._fence_milestone(binding, "provider_acknowledged")
+        run_dimensions = await self._run_dimensions(binding)
         settlement = _lane_settlement(
             binding,
             facts,
             native_turn_ref=native_turn_ref,
             cancelled_by_command=cancelled_by_command,
+            final_text=final_text,
+            run_dimensions=run_dimensions,
         )
         try:
-            _validate_bound_usage(binding, settlement.usage)
+            _validate_bound_usage(binding, settlement.usage, unreserved=run_dimensions)
         except OperationBudgetViolation as violation:
             # The lane ran past the bound budget: the attempt fails `budget_exceeded`, with the
             # observed usage recorded (never counted as zero).
@@ -986,6 +1053,16 @@ class OperationExecutionService:
         if cancelled_by_command:
             await self._fence_milestone(binding, "settled")
         return result
+
+    async def _run_dimensions(self, binding: OperationExecutionBinding) -> frozenset[str]:
+        """The run's chargeable dimensions (MP-20), when the authority can say; otherwise a
+        lane settlement charges only what its own reservation bounds, as before."""
+
+        if not isinstance(self._authority, RunBudgetDimensionsPort):
+            return frozenset()
+        return frozenset(LANE_TOKEN_DIMENSIONS) & await self._authority.charged_budget_dimensions(
+            binding.request_scope, binding.run_id
+        )
 
     async def lane_in_doubt(
         self, request: OperationExecutionRequest, *, reason: str
@@ -1983,24 +2060,79 @@ _LANE_STATUS: dict[str, Literal["completed", "failed", "cancelled"]] = {
 }
 
 
+def lane_usage_amounts(
+    binding: OperationExecutionBinding,
+    facts: ClosingFacts,
+    run_dimensions: frozenset[str] = frozenset(),
+) -> dict[str, int]:
+    """The token amounts a Session Lane settlement charges (MP-20).
+
+    Exactly the settled turn's closing usage as the lane reports it (`settled` or
+    `estimated`): provider-inclusive totals (subagent work the provider already counts in
+    the turn's usage) are charged once and never summed with subordinate frames. `unknown`
+    usage charges nothing: the dimension stays absent, never zero, never invented. A
+    dimension is charged when the unit's reservation bounds it (validated against that
+    bound) or the run's envelope declares it (`run_dimensions`)."""
+
+    if facts.usage.disposition == "unknown":
+        return {}
+    amounts = {
+        "tokens.input": facts.usage.input_tokens,
+        "tokens.output": facts.usage.output_tokens,
+        "tokens.total": facts.usage.total_tokens,
+    }
+    return {
+        dimension: amount
+        for dimension, amount in amounts.items()
+        if dimension in binding.budget_limits or dimension in run_dimensions
+    }
+
+
+def lane_final_text(
+    facts: ClosingFacts, final_text: str | None
+) -> tuple[str | None, tuple[dict[str, object], ...]]:
+    """The full final assistant text a Completion Candidate may be parsed from, bounded by
+    `MAX_COMPLETION_CANDIDATE_CHARS`; never a truncated excerpt.
+
+    The lane's own final text wins. Without it, the closing facts' text is used only when it
+    provably is the whole text (shorter than the excerpt cap). A text over the bound, or an
+    excerpt at the cap, yields no candidate (fail closed, as an unparsable answer does) with a
+    provenance warning when it looked like a JSON object."""
+
+    if final_text is not None:
+        if len(final_text) <= MAX_COMPLETION_CANDIDATE_CHARS:
+            return final_text, ()
+        reason, size = "completion_candidate_too_large", len(final_text)
+        looked_like_json = final_text.lstrip().startswith("{")
+    else:
+        excerpt = facts.result_excerpt
+        if len(excerpt) < MAX_EXCERPT_CHARS:
+            return excerpt, ()
+        reason, size = "completion_candidate_truncated", len(excerpt)
+        looked_like_json = excerpt.lstrip().startswith("{")
+    if not looked_like_json:
+        return None, ()
+    return None, (
+        {
+            "kind": "provenance",
+            "reason": reason,
+            "final_text_chars": size,
+            "bound_chars": MAX_COMPLETION_CANDIDATE_CHARS,
+        },
+    )
+
+
 def _lane_settlement(
     binding: OperationExecutionBinding,
     facts: ClosingFacts,
     *,
     native_turn_ref: str | None,
     cancelled_by_command: bool = True,
+    final_text: str | None = None,
+    run_dimensions: frozenset[str] = frozenset(),
 ) -> OperationSettlement:
     status = _LANE_STATUS[facts.native_status]
-    amounts = {
-        "tokens.input": facts.usage.input_tokens,
-        "tokens.output": facts.usage.output_tokens,
-        "tokens.total": facts.usage.total_tokens,
-    }
-    bound = {
-        dimension: amount
-        for dimension, amount in amounts.items()
-        if dimension in binding.budget_limits and facts.usage.disposition != "unknown"
-    }
+    charged = lane_usage_amounts(binding, facts, run_dimensions)
     failure_code: str | None = None
     if facts.native_status == "finished" and facts.missing_outputs:
         # FT-G4: a native `finished` without the declared outputs is not acceptance
@@ -2026,15 +2158,25 @@ def _lane_settlement(
             )
         )
     )
+    structured: dict[str, object] | None = None
+    warnings: tuple[dict[str, object], ...] = ()
+    if status == "completed":
+        text, warnings = lane_final_text(facts, final_text)
+        if text is not None:
+            structured, warnings = lane_completion_candidate(text, refs)
+    event_payload: dict[str, object] = {"lane_closing_facts": facts.model_dump(mode="json")}
+    if warnings:
+        event_payload["provenance_warnings"] = list(warnings)
     return OperationSettlement(
         settlement_id=operation_settlement_id(binding.binding_id),
         binding_id=binding.binding_id,
         status=status,
         output_text=facts.result_excerpt,
+        structured_output=structured,
         output_refs=refs,
-        usage=RuntimeUsage(amounts=bound),
+        usage=RuntimeUsage(amounts=charged),
         provider_run_id=native_turn_ref,
-        event_payloads=({"lane_closing_facts": facts.model_dump(mode="json")},),
+        event_payloads=(event_payload,),
         failure_code=failure_code,
         failure_message=(
             None
@@ -2047,6 +2189,49 @@ def _lane_settlement(
         ),
         settled_at=datetime.now(UTC),
     )
+
+
+def lane_completion_candidate(
+    final_text: str, registered_refs: tuple[str, ...]
+) -> tuple[dict[str, object] | None, tuple[dict[str, object], ...]]:
+    """MP-20: a Session Lane's Completion Candidate, read exactly as the Deep Agents lane reads
+    its final answer (`adapters/deep_agents/adapter._structured_output`): the final assistant
+    text when it is one JSON object, else no structured output.
+
+    The family reads it as the operation's typed result (Stage Graph `obligation_refs` and
+    outputs, the GoalDirected executor/verifier observation). A lane agent cannot know the refs
+    its files are registered under (custody happens at `end_session`), so a candidate that
+    names `output_refs` gets exactly the attempt's registered workspace candidates (FT-B2
+    `drop_unregistered`); every emitted ref that is not one of them is dropped with a
+    provenance warning. A candidate without the key is left as written (a verifier observation
+    declares no outputs). Patch, snapshot and transcript refs stay on the settlement's custody
+    refs, never on the candidate.
+    """
+
+    text = final_text.strip()
+    if not text.startswith("{"):
+        return None, ()
+    try:
+        decoded = json.loads(text)
+    except ValueError:
+        return None, ()
+    if not isinstance(decoded, dict):
+        return None, ()
+    if "output_refs" not in decoded:
+        return decoded, ()
+    registered = tuple(ref for ref in registered_refs if parse_workspace_candidate_ref(ref))
+    emitted = decoded.get("output_refs", ())
+    values = emitted if isinstance(emitted, list | tuple) else (emitted,)
+    warnings: tuple[dict[str, object], ...] = tuple(
+        {
+            "kind": "provenance",
+            "dropped_output_ref": str(value),
+            "reason": "not_registered_by_this_attempt",
+        }
+        for value in values
+        if value is not None and str(value) not in registered
+    )
+    return {**decoded, "output_refs": list(registered)}, warnings
 
 
 class InMemoryOperationBindingRepository:
@@ -2234,6 +2419,8 @@ def _binding_for(request: OperationExecutionRequest, fingerprint: str) -> Operat
         deep_agent_binding=request.deep_agent_binding,
         lane_profile=request.lane_profile,
         cursor_binding=request.cursor_binding,
+        # MP-07/MP-08: a claude/codex runtime carries its `mc.execution_binding.v2`.
+        provider_binding=request.provider_binding,
         side_effect_key=request.idempotency_key,
         bound_at=request.requested_at,
         runtime_unit=request.runtime_unit,
@@ -2318,16 +2505,34 @@ def _error_type(error: BaseException) -> str:
     return type(error).__name__
 
 
-def _validate_bound_usage(binding: OperationExecutionBinding, usage: RuntimeUsage) -> None:
+def _unbound_dimensions(binding: OperationExecutionBinding, usage: RuntimeUsage) -> frozenset[str]:
+    return frozenset(
+        (usage.amounts.keys() | usage.pending_external_amounts.keys())
+        - binding.budget_limits.keys()
+    )
+
+
+def _validate_bound_usage(
+    binding: OperationExecutionBinding,
+    usage: RuntimeUsage,
+    *,
+    unreserved: frozenset[str] = frozenset(),
+) -> None:
+    """Usage is bounded by the binding's limits. `unreserved` (MP-20, Session Lane token
+    usage) names run dimensions that may be charged without a unit bound: recorded actual
+    amounts only (never pending), checked against the run's hard caps by the reducer."""
+
     usage_dimensions = usage.amounts.keys() | usage.pending_external_amounts.keys()
-    unbound_dimensions = usage_dimensions - binding.budget_limits.keys()
+    unbound_dimensions = (usage_dimensions - binding.budget_limits.keys()) - (
+        unreserved - usage.pending_external_amounts.keys()
+    )
     if unbound_dimensions:
         raise OperationBudgetViolation(
             "runtime reported unbound budget dimensions: " + ", ".join(sorted(unbound_dimensions))
         )
     exceeded = {
         dimension
-        for dimension in usage_dimensions
+        for dimension in usage_dimensions & binding.budget_limits.keys()
         if (
             usage.amounts.get(dimension, 0) + usage.pending_external_amounts.get(dimension, 0)
             > binding.budget_limits[dimension]

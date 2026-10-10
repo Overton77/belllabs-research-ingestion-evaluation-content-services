@@ -1,0 +1,47 @@
+# yaml-language-server: $schema=../../../../src/mission_control/contracts/schemas/mc.mission_manifest.v2.json
+# mission/v2 Goal Loop on the Cursor-hosted lane (cursor_cloud) with an independent verifier.
+# Checked example: compiled by tests/unit/authoring/test_manifest_cursor_launch.py
+# against the fast-track fixture catalog, and its launch templates authored against
+# deployments/examples/manifest-launch-bindings.multi-provider.example.json (providers.cursor_cloud):
+# executor and verifier each carry a sealed mc.cursor_binding.v1 (repository, run-branch prefix and cloud
+# options from the deployment's reviewed repository and environment entries).
+manifest: mission/v2
+mission:
+  key: cursor-cloud-evidence-map
+  title: Evidence map on a Cursor cloud agent
+  application: ai-engineer
+  goals:
+    - key: evidence_map
+      description: The evidence map names every included study with a citation
+      criteria:
+        - key: cited
+          description: Every claim carries a resolvable citation
+          evidence: [evidence_map]
+          acceptance: { schema: claim_table@1 }
+  environment:
+    lane: cursor_cloud
+    model: { profile: cursor.default }
+    auth: { profile: cursor-cloud-key }
+    execution_environment:
+      kind: provider_hosted
+      provider: cursor
+      environment_ref: cursor-cloud.default
+    workspace:
+      repo: { url: "https://github.com/Overton77/mission-control-fixture", ref: main }
+      policy: { mode: provider_workspace, reuse: within_session, dirty_input: reject, cleanup: retain_until_artifacts_registered }
+    requires:
+      controls: [cancel]
+      approvals: [workflow_gate]
+      observation: [terminal_result]
+    budget: { tokens: 400000, wall_clock: 2h, tool_calls: 200 }
+    governors: { depth: 1, fan_out: 2, iterations: 4, patience: 2 }
+    side_effects: [read_only, workspace_write, external_write_reversible]
+  program:
+    key: root
+    behavior: goal_loop
+    objective: evidence_map
+    action_space: [root]
+    # The independent verifier runs on its own Cursor cloud agent under the same admission.
+    verifier: { independent: true }
+    outputs:
+      - { name: evidence_map, schema: claim_table@1, required: true }

@@ -20,6 +20,7 @@ with workflow.unsafe.imports_passed_through():
     from mission_control.domain.execution.contracts import (
         MAX_ACTIVE_ASYNC_CHILDREN,
         MAX_ASYNC_CHILD_ID_LENGTH,
+        SESSION_LANE_RUNTIMES,
         OperationWorkflowRequest,
         OperationWorkflowResult,
     )
@@ -74,6 +75,28 @@ LANE_PAUSE_PATCH = "ft-g4-lane-boundary-pause"
 # it the failure failed the workflow, which every earlier history replays unchanged.
 CAPACITY_WAIT_PATCH = "mp05-capacity-wait"
 PROVIDER_CAPACITY_LIMIT = "provider_capacity_limit"
+# MP-12 (SPEC-01 "Four independent progress mechanisms", ADR-0039): a `lane.turn` that ends
+# a segment at a safe boundary without settling (`done=False` with closing facts) reports a
+# continuation: the loop drives the persisted phase machine through `continuation.advance`
+# (one activity call per phase, each idempotent) until the target generation is activated,
+# then sends the next turn (`turn_no + 1`) to it; a transfer that ends without a target
+# resumes the segment so the lane settles the finished source turn. Only histories whose
+# lane reported a continuation boundary carry the marker; every earlier history replays
+# unchanged. Continuation transfers never touch the segment, turn or limit-wait counters of
+# this loop beyond the one turn they add.
+CONTINUATION_PATCH = "mp12-operation-continuation"
+CONTINUATION_ADVANCE_RETRY = RetryPolicy(
+    initial_interval=timedelta(seconds=1),
+    maximum_interval=timedelta(seconds=30),
+    backoff_coefficient=2.0,
+    maximum_attempts=12,
+)
+# Rejections `continuation.advance` raises when the transfer ended without a target; the
+# loop then resumes the segment so the finished source turn settles.
+CONTINUATION_ENDED_TYPES = frozenset(
+    {"CHECKPOINT_INVALID", "continuation_generation_conflict", "continuation_phase_rejected"}
+)
+MAX_CONTINUATION_PHASES = 16
 TERMINAL_DISPOSITIONS = frozenset({"completed", "cancelled", "failed", "in_doubt"})
 # `lane.turn` retries infrastructure failures (a lost worker, a heartbeat timeout) only:
 # rejections are non-retryable application errors raised by the activity.
@@ -95,6 +118,22 @@ def _parks(result: dict[str, object]) -> bool:
     return (
         result.get("status") == "in_doubt" and result.get("failure_code") != "generation_superseded"
     )
+
+
+def _continuation_boundary(result: LaneTurnResult) -> bool:
+    """MP-12: the segment ended at a finished turn without settling (continuation pending)."""
+
+    return (
+        not result.done
+        and not result.busy
+        and result.closing_facts is not None
+        and result.closing_facts.native_status == "finished"
+    )
+
+
+def _continuation_ended(error: ActivityError) -> bool:
+    cause = error.cause
+    return isinstance(cause, ApplicationError) and cause.type in CONTINUATION_ENDED_TYPES
 
 
 def _capacity_signal(error: ActivityError) -> ProviderLimitSignal | None:
@@ -182,7 +221,12 @@ class _SegmentLoop:
         self.turn_no = point.turn_no
         self.native = NativeRefs()
         self.capacity_exhausted = False
-        if request.operation.execution_runtime == "cursor":
+        self.capacity_wait = request.capacity_wait
+        # MP-12: the activated continuation whose first turn the next segment sends; the
+        # lane resolves it from the ledger too, so losing it across continue-as-new is safe.
+        self.instruction_ref: str | None = None
+        self.continuations = 0
+        if request.operation.execution_runtime in SESSION_LANE_RUNTIMES:
             self.start_to_close = timedelta(seconds=self.bounds.start_to_close_s)
             self.heartbeat_timeout = timedelta(seconds=self.bounds.heartbeat_timeout_s)
         else:
@@ -565,6 +609,7 @@ class OperationWorkflow:
             segment_no=loop.segment_no,
             segment=bounds,
             capacity_exhausted=loop.capacity_exhausted,
+            instruction_ref=loop.instruction_ref,
         )
         handle = workflow.start_activity(
             "lane.turn",
@@ -612,6 +657,12 @@ class OperationWorkflow:
             # `wait_then_send`: nothing was sent; wait for the agent to be idle.
             loop.capacity_exhausted = not await self._wait_until_idle(request, loop)
             return None
+        if _continuation_boundary(result) and workflow.patched(CONTINUATION_PATCH):
+            self._turn_in_flight = False
+            loop.segment_no += 1
+            self._visibility(request, "executing")
+            await self._continue_session(request, loop, result)
+            return None
         loop.cursor, loop.phase = result.cursor, "resume"
         loop.segment_no += 1
         self._visibility(request, "executing")
@@ -637,6 +688,95 @@ class OperationWorkflow:
     def _turn_ended_or_cancelled(self, handle: workflow.ActivityHandle[Any]) -> bool:
         return handle.done() or self._cancel_requested
 
+    # --- MP-12: the continuation phase machine at the safe boundary ---------------------------
+
+    async def _continue_session(
+        self, request: OperationWorkflowRequest, loop: _SegmentLoop, boundary: LaneTurnResult
+    ) -> None:
+        """Drive the pending transfer phase by phase; on activation the next segment starts
+        the continuation turn on the target, otherwise it resumes and settles the source."""
+
+        pending = await self._pending_continuation(request, loop, boundary)
+        if pending is None:
+            # Nothing is pending after all (settled elsewhere): resume and settle the turn.
+            loop.cursor, loop.phase = boundary.cursor, "resume"
+            return
+        transfer_id, phase = pending
+        outcome: dict[str, object] | None = None
+        for _step in range(MAX_CONTINUATION_PHASES):
+            if phase == "activated":
+                break
+            try:
+                outcome = await self._advance_continuation(request, loop, transfer_id)
+            except ActivityError as error:
+                if not _continuation_ended(error):
+                    raise
+                outcome = None
+                break
+            phase = str(outcome.get("phase", ""))
+            if outcome.get("ended") and not outcome.get("activated"):
+                outcome = None
+                break
+        if outcome is None or not outcome.get("activated"):
+            # The transfer ended without a target (or a phase was refused): the source
+            # generation is released and the finished turn settles on the next segment.
+            loop.cursor, loop.phase = boundary.cursor, "resume"
+            return
+        loop.continuations += 1
+        target_turn = outcome.get("target_turn_no")
+        loop.turn_no = target_turn if isinstance(target_turn, int) else loop.turn_no + 1
+        loop.phase, loop.cursor = "start", None
+        loop.instruction_ref = f"continuation:{transfer_id}"
+        target = outcome.get("target_session_ref")
+        if isinstance(target, str) and target:
+            loop.native = NativeRefs(session_ref=target)
+
+    async def _pending_continuation(
+        self, request: OperationWorkflowRequest, loop: _SegmentLoop, boundary: LaneTurnResult
+    ) -> tuple[str, str] | None:
+        """The transfer the lane reported at the boundary: its id and current phase."""
+
+        del boundary
+        outcome: dict[str, object] = await workflow.execute_activity(
+            "continuation.pending",
+            self._continuation_payload(request, loop),
+            result_type=dict,
+            task_queue=request.activity_task_queue,
+            start_to_close_timeout=timedelta(seconds=60),
+            retry_policy=LANE_CONTROL_RETRY,
+        )
+        transfer_id = outcome.get("transfer_id")
+        if not isinstance(transfer_id, str) or not transfer_id:
+            return None
+        return transfer_id, str(outcome.get("phase", "requested"))
+
+    async def _advance_continuation(
+        self, request: OperationWorkflowRequest, loop: _SegmentLoop, transfer_id: str
+    ) -> dict[str, object]:
+        outcome: dict[str, object] = await workflow.execute_activity(
+            "continuation.advance",
+            {**self._continuation_payload(request, loop), "transfer_id": transfer_id},
+            result_type=dict,
+            task_queue=request.activity_task_queue,
+            start_to_close_timeout=loop.start_to_close,
+            heartbeat_timeout=loop.heartbeat_timeout,
+            retry_policy=CONTINUATION_ADVANCE_RETRY,
+        )
+        return outcome
+
+    @staticmethod
+    def _continuation_payload(
+        request: OperationWorkflowRequest, loop: _SegmentLoop
+    ) -> dict[str, object]:
+        return {
+            "request_scope": request.operation.request_scope,
+            "lane_profile": loop.lane_profile,
+            "operation": request.operation.model_dump(mode="json"),
+            "generation": request.execution_generation,
+            "turn_no": loop.turn_no,
+            "source_session_ref": loop.native.session_ref,
+        }
+
     async def _wait_out_capacity(self, loop: _SegmentLoop, signal: ProviderLimitSignal) -> None:
         """Wait for a provider limit reset on a Temporal timer, bounded by the unit's
         segment budget; a rejection or a spent wait settles `failed(capacity)` next."""
@@ -646,7 +786,11 @@ class OperationWorkflow:
             seconds=bounds.max_segments * bounds.start_to_close_s
         )
         decision = plan_limit_response(
-            signal, now=workflow.now(), deadline=deadline, ledger=self._limit_ledger
+            signal,
+            now=workflow.now(),
+            deadline=deadline,
+            policy=loop.capacity_wait,
+            ledger=self._limit_ledger,
         )
         if decision.disposition == "reject":
             loop.capacity_exhausted = True

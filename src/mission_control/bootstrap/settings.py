@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hmac
 import os
+from decimal import Decimal
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -321,11 +322,50 @@ class Settings(BaseSettings):
     mission_control_session_lease_min_s: int = Field(default=10, ge=1, le=3_600)
     mission_control_session_lease_heartbeats: int = Field(default=2, ge=1, le=10)
     mission_control_dispatch_receipt_grace_s: float = Field(default=10.0, ge=0, le=300)
+    # MP-12 context pressure (SPEC-01 tuning inputs, not provider guarantees): the worker's
+    # policy for Session Lanes until a binding carries its own. Native compaction is used only
+    # where a lane's describe says `compaction_control: native` and it implements it.
+    mission_control_context_soft_ratio: Decimal = Field(default=Decimal("0.70"), gt=0, le=1)
+    mission_control_context_hard_ratio: Decimal = Field(default=Decimal("0.85"), gt=0, le=1)
+    mission_control_context_reserve_ratio: Decimal = Field(default=Decimal("0.15"), ge=0, lt=1)
+    mission_control_context_max_session_turns: int | None = Field(default=None, ge=1)
+    mission_control_continuation_max_transfers: int = Field(default=8, ge=0)
+    mission_control_continuation_max_compaction_failures: int = Field(default=2, ge=0)
+    mission_control_native_compaction: Literal["preferred", "disabled", "required"] = "preferred"
+    # MP-11 native approvals: how long a lane's native permission/question callback waits on
+    # its Human Task inside one `lane.turn` segment (segments run up to 30 min) before the
+    # native correlation expires; the durable task stays open and a later request re-binds it.
+    mission_control_approval_wait_s: float = Field(default=300.0, gt=0, le=600)
+    # Who may resolve a native approval task (a principal, or a verified `reviewer:<role>`
+    # grant); the `owner` role by default, as for an undeclared Goal Loop review.
+    mission_control_approval_reviewers: tuple[str, ...] = ("owner",)
+    # MP-07 `claude_agent_sdk` and MP-08 `codex` local lanes: explicit opt-in per worker (they
+    # spawn provider subprocesses, so Linux/WSL workers only) plus an MP-05 auth profile path.
+    # Unset lease roots default under the sandbox workspace root.
+    # The lane task queues this worker serves besides `<base>.agent-cognitive`: the
+    # `task_queue` values of the Cursor/Claude/Codex launch bindings routed to this worker pool.
+    mission_control_lane_task_queues: tuple[str, ...] = ()
+    mission_control_claude_lane: bool = False
+    mission_control_claude_lease_root: Path | None = None
+    mission_control_claude_init_timeout_s: float = Field(default=60.0, gt=0, le=600)
+    mission_control_claude_drain_timeout_s: float = Field(default=20.0, gt=0, le=600)
+    mission_control_codex_lane: bool = False
+    mission_control_codex_binary: str = "codex"
+    mission_control_codex_lease_root: Path | None = None
+    mission_control_codex_home_mode: Literal["isolated", "owner"] = "isolated"
+    mission_control_codex_owner_home: Path | None = None
+    mission_control_codex_repository: str | None = None
+    # Refuse a `codex --version` other than the pinned 0.162.0 unless explicitly overridden.
+    mission_control_codex_allow_version_mismatch: bool = False
     # MP-14 `/missions` socket (`bootstrap/realtime.py`): relay presence and commit hints
     # between API processes over `redis_url`; off serves one process with PostgreSQL replay.
     mission_socket_redis_fanout: bool = False
     # The 0032 `mc_stream_hint` LISTEN source, one connection per application database.
     mission_socket_postgres_hints: bool = True
+    # SPEC-04: an idle connection's credential is re-verified this often (revocation, expiry);
+    # a command's accepted/delivered/applied receipts are followed for at most this long.
+    mission_socket_reauthorize_seconds: float = Field(default=5.0, gt=0, le=300)
+    mission_socket_command_follow_seconds: float = Field(default=120.0, gt=0, le=3_600)
     # MP-15 webhook egress: callbacks go to global addresses over https only; loopback and
     # private networks are admitted only when listed here (local development, in-cluster
     # receivers). Every delivery is pinned to the validated address.

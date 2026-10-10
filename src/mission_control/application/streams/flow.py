@@ -14,7 +14,9 @@ from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from mission_control.domain.subscriptions.streams import StreamName
+# A window is kept per cursor domain ("channel"): the stream name for a single domain, or
+# `<stream>:<execution or mission>` when one subscription reads several.
+Channel = str
 
 
 @dataclass
@@ -33,19 +35,19 @@ class InflightWindow:
     max_bytes: int
     budget: ConnectionBudget
     used: int = 0
-    _entries: dict[StreamName, deque[tuple[int, int]]] = field(default_factory=dict)
+    _entries: dict[Channel, deque[tuple[int, int]]] = field(default_factory=dict)
 
     def fits(self, size: int) -> bool:
         if self.used == 0 and self.budget.used == 0:
             return True  # one envelope always fits an idle connection
         return self.used + size <= self.max_bytes and self.budget.fits(size)
 
-    def add(self, stream: StreamName, position: int, size: int) -> None:
+    def add(self, stream: Channel, position: int, size: int) -> None:
         self._entries.setdefault(stream, deque()).append((position, size))
         self.used += size
         self.budget.used += size
 
-    def release(self, stream: StreamName, upto: int) -> int:
+    def release(self, stream: Channel, upto: int) -> int:
         """Forget envelopes at or below `upto`; returns the bytes freed."""
 
         freed = 0
@@ -56,7 +58,7 @@ class InflightWindow:
         self.budget.used -= freed
         return freed
 
-    def reset_stream(self, stream: StreamName) -> None:
+    def reset_stream(self, stream: Channel) -> None:
         entries = self._entries.pop(stream, deque())
         freed = sum(size for _position, size in entries)
         self.used -= freed
@@ -90,4 +92,4 @@ class TokenBucket:
         return True
 
 
-__all__ = ["ConnectionBudget", "InflightWindow", "TokenBucket"]
+__all__ = ["Channel", "ConnectionBudget", "InflightWindow", "TokenBucket"]

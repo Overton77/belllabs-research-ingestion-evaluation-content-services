@@ -9,8 +9,17 @@ Contract (SPEC-04 "Socket contract", ADR-0036):
 - client `subscribe`, `ack`, `unsubscribe`, `command`, `resolve_human_task`,
   `reauthenticate`; each one reauthorizes the stored credential first and is rate limited.
 - server `subscribed` (the `SubscribeAck`, also returned as the event's ack), `snapshot`,
-  `mission_event`, `provider_frame`, `presence`, `command_receipt`, `human_task_receipt`,
-  `resync_required`, `stream_error` (a frozen `StreamError`; never exception text).
+  `mission_event`, `provider_frame`, `presence`, `lineage`, `command_receipt`,
+  `human_task_receipt`, `resync_required`, `stream_error` (a frozen `StreamError`; never
+  exception text). Event names and the `lineage` / receipt-progress bodies are versioned in
+  `contracts/realtime.py` (`mc.realtime.v1`).
+
+Authorization is not only checked at the edge of a client event: a per-connection watchdog
+reverifies the stored credential with the same resolver every `reauthorize_seconds` and at
+its `exp`, so a revoked grant or binding, or an expired token, detaches every subscription
+and disconnects even an idle connection that sends nothing. A command's later durable
+receipt states (`queued`, `delivered`, `applied`, ...) are followed through the same
+application read handler as HTTP and emitted as further `command_receipt` events.
 
 Room membership is never authorization: durable envelopes are emitted to the subscribing
 `sid` by its own pump, which reads through the tenant-bound stream service. Rooms are used
@@ -22,8 +31,10 @@ never from a client-supplied name. The scope comes from the verified principal; 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import logging
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -36,7 +47,12 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from socketio.exceptions import ConnectionRefusedError as SocketConnectionRefused
 
 from mission_control.application.streams.flow import ConnectionBudget, InflightWindow, TokenBucket
-from mission_control.application.streams.hub import HintKey, StreamWakeups, target_keys
+from mission_control.application.streams.hub import (
+    HintKey,
+    StreamWakeups,
+    execution_keys,
+    target_keys,
+)
 from mission_control.application.streams.pump import PumpSettings, SubscriptionPump
 from mission_control.application.streams.service import (
     MissionStreamService,
@@ -44,7 +60,9 @@ from mission_control.application.streams.service import (
     SnapshotNotice,
     StreamFailure,
 )
+from mission_control.contracts.contracts import MissionCommandReceipt
 from mission_control.domain.subscriptions.streams import (
+    MAX_STREAM_CURSORS,
     StreamCursor,
     StreamEnvelope,
     StreamError,
@@ -61,6 +79,7 @@ from mission_control.interfaces.socketio.auth import (
     token_expiry,
 )
 from mission_control.interfaces.socketio.commands import (
+    follow_command_receipts,
     forward_command,
     forward_human_task_resolution,
     mission_service,
@@ -86,12 +105,21 @@ class MissionSocketLimits:
     messages_per_second: float = 20.0
     message_burst: int = 40
     pump: PumpSettings = field(default_factory=PumpSettings)
+    # Reverify an idle connection's credential this often (revoked grant or binding).
+    reauthorize_seconds: float = 5.0
+    # Follow at most this many commands' receipt ledgers per connection, each this long.
+    max_command_followers: int = 8
+    command_follow_seconds: float = 120.0
 
     def __post_init__(self) -> None:
         if not 1 <= self.max_subscriptions <= 256:
             raise ValueError("max subscriptions per connection must be between 1 and 256")
         if not 65_536 <= self.max_connection_queue_bytes <= 67_108_864:
             raise ValueError("connection queue bound must be between 64 KiB and 64 MiB")
+        if self.reauthorize_seconds <= 0 or self.command_follow_seconds <= 0:
+            raise ValueError("reauthorization and receipt following intervals must be positive")
+        if not 0 <= self.max_command_followers <= 64:
+            raise ValueError("command receipt followers per connection must be between 0 and 64")
 
 
 class SubscribeRequest(BaseModel):
@@ -101,7 +129,7 @@ class SubscribeRequest(BaseModel):
     target: StreamTarget
     streams: tuple[StreamName, ...] = Field(min_length=1, max_length=3)
     filters: StreamFilters = Field(default_factory=StreamFilters)
-    cursors: tuple[StreamCursor, ...] = Field(default=(), max_length=3)
+    cursors: tuple[StreamCursor, ...] = Field(default=(), max_length=MAX_STREAM_CURSORS)
     include_descendants: bool = False
     max_queue_bytes: int | None = Field(default=None, ge=65_536, le=67_108_864)
     delta_coalesce_ms: int | None = Field(default=None, ge=0, le=10_000)
@@ -110,7 +138,7 @@ class SubscribeRequest(BaseModel):
 class AckRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     subscription_id: str = Field(min_length=1, max_length=512)
-    cursors: tuple[StreamCursor, ...] = Field(min_length=1, max_length=3)
+    cursors: tuple[StreamCursor, ...] = Field(min_length=1, max_length=MAX_STREAM_CURSORS)
 
 
 class UnsubscribeRequest(BaseModel):
@@ -133,7 +161,7 @@ class CredentialRevoked(StreamFailure):
 @dataclass
 class _Subscription:
     pump: SubscriptionPump
-    keys: tuple[HintKey, ...]
+    keys: list[HintKey]
     presence_room: str | None
     task: asyncio.Task[str] | None = None
 
@@ -147,12 +175,22 @@ class _Connection:
     budget: ConnectionBudget
     bucket: TokenBucket
     subscriptions: dict[str, _Subscription] = field(default_factory=dict)
+    watchdog: asyncio.Task[None] | None = None
+    followers: set[asyncio.Task[str]] = field(default_factory=set)
+    # The pumps and the watchdog may both notice an expiry: report it once.
+    unauthorized_reported: bool = False
+
+    def report_unauthorized(self) -> bool:
+        first = not self.unauthorized_reported
+        self.unauthorized_reported = True
+        return first
 
 
 class _SocketDelivery:
-    def __init__(self, namespace: MissionNamespace, sid: str) -> None:
+    def __init__(self, namespace: MissionNamespace, connection: _Connection) -> None:
         self._namespace = namespace
-        self._sid = sid
+        self._sid = connection.sid
+        self._connection = connection
 
     async def envelope(self, envelope: StreamEnvelope) -> None:
         await self._namespace.emit(
@@ -163,7 +201,12 @@ class _SocketDelivery:
         await self._namespace.emit("resync_required", notice, to=self._sid)
 
     async def error(self, error: StreamError) -> None:
+        if error.code == "UNAUTHORIZED" and not self._connection.report_unauthorized():
+            return
         await self._namespace.emit("stream_error", error.model_dump(mode="json"), to=self._sid)
+
+    async def lineage(self, notice: dict[str, Any]) -> None:
+        await self._namespace.emit("lineage", notice, to=self._sid)
 
 
 def presence_room(request_scope: str, mission_ref: str) -> str:
@@ -207,6 +250,7 @@ class MissionNamespace(socketio.AsyncNamespace):
             connection = self._connections.pop(sid, None)
             if connection is not None:
                 await self._detach_all(connection)
+                await self._stop_tasks(connection)
                 await self.disconnect(sid)
 
     # --- connect / disconnect --------------------------------------------------------
@@ -220,7 +264,7 @@ class MissionNamespace(socketio.AsyncNamespace):
             raise SocketConnectionRefused(_refusal(error.code)) from None
         if credential.expired():
             raise SocketConnectionRefused(_refusal("invalid_token"))
-        self._connections[sid] = _Connection(
+        connection = _Connection(
             sid=sid,
             application_id=credential.principal.application_id,
             credential=credential,
@@ -228,11 +272,55 @@ class MissionNamespace(socketio.AsyncNamespace):
             budget=ConnectionBudget(self._limits.max_connection_queue_bytes),
             bucket=TokenBucket(self._limits.messages_per_second, self._limits.message_burst),
         )
+        self._connections[sid] = connection
+        connection.watchdog = asyncio.create_task(self._watch(connection))
 
     async def on_disconnect(self, sid: str, reason: Any = None) -> None:
         connection = self._connections.pop(sid, None)
         if connection is not None:
             await self._detach_all(connection)
+            await self._stop_tasks(connection)
+
+    async def _stop_tasks(self, connection: _Connection) -> None:
+        current = asyncio.current_task()
+        tasks: list[asyncio.Task[Any]] = [
+            task for task in connection.followers if task is not current
+        ]
+        if connection.watchdog is not None and connection.watchdog is not current:
+            tasks.append(connection.watchdog)
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        connection.followers.clear()
+
+    async def _watch(self, connection: _Connection) -> None:
+        """Reverify the stored credential periodically and at its `exp`, even when idle."""
+
+        while self._connections.get(connection.sid) is connection:
+            delay = self._limits.reauthorize_seconds
+            expires_at = connection.credential.expires_at
+            if expires_at is not None:
+                delay = min(delay, max(expires_at - time.time(), 0.0))
+            await asyncio.sleep(max(delay, 0.01))
+            if self._connections.get(connection.sid) is not connection:
+                return
+            try:
+                self._reauthorize(connection)
+            except StreamFailure as failure:
+                await self._revoke(connection, failure)
+                return
+
+    async def _revoke(self, connection: _Connection, failure: StreamFailure) -> None:
+        error = failure.error()
+        if connection.report_unauthorized():
+            with contextlib.suppress(Exception):
+                await self.emit("stream_error", error.model_dump(mode="json"), to=connection.sid)
+        if self._connections.get(connection.sid) is connection:
+            self._connections.pop(connection.sid, None)
+        await self._detach_all(connection)
+        await self._stop_tasks(connection)
+        with contextlib.suppress(Exception):
+            await self.disconnect(connection.sid)
 
     # --- client events ---------------------------------------------------------------
 
@@ -270,10 +358,12 @@ class MissionNamespace(socketio.AsyncNamespace):
             return await handler(connection, data)
         except StreamFailure as failure:
             error = failure.error(request_id=request_id, subscription_id=subscription_id)
-            await self.emit("stream_error", error.model_dump(mode="json"), to=sid)
+            if not isinstance(failure, CredentialRevoked) or connection.report_unauthorized():
+                await self.emit("stream_error", error.model_dump(mode="json"), to=sid)
             if isinstance(failure, CredentialRevoked):
                 self._connections.pop(sid, None)
                 await self._detach_all(connection)
+                await self._stop_tasks(connection)
                 await self.disconnect(sid)
             return {"ok": False, "error": error.model_dump(mode="json")}
         except Exception:
@@ -293,7 +383,9 @@ class MissionNamespace(socketio.AsyncNamespace):
             request_scope=connection.credential.request_scope,
             expires_at=connection.credential.expires_at,
         )
-        if not fresh.same_identity(connection.credential) or fresh.expired():
+        if fresh.expired():
+            raise CredentialRevoked("credential expired")
+        if not fresh.same_identity(connection.credential):
             raise CredentialRevoked("credential identity changed")
         connection.credential = fresh
 
@@ -332,7 +424,7 @@ class MissionNamespace(socketio.AsyncNamespace):
         except ValidationError:
             raise StreamFailure("UNSUPPORTED_FILTER", "incoherent subscription") from None
         opened = await service.open(subscription, principal.actor)
-        delivery = _SocketDelivery(self, connection.sid)
+        delivery = _SocketDelivery(self, connection)
         pump = SubscriptionPump(
             service,
             opened,
@@ -340,6 +432,7 @@ class MissionNamespace(socketio.AsyncNamespace):
             InflightWindow(subscription.max_queue_bytes, connection.budget),
             self._limits.pump,
             authorized=lambda: not connection.credential.expired(),
+            on_executions=lambda executions: self._follow(entry, service, executions),
         )
         mission_ref = f"mission:{opened.target.mission_id}"
         room = (
@@ -347,7 +440,11 @@ class MissionNamespace(socketio.AsyncNamespace):
             if "presence" in subscription.streams
             else None
         )
-        entry = _Subscription(pump, target_keys(service.request_scope, opened.target), room)
+        keys = [
+            *target_keys(service.request_scope, opened.target),
+            *execution_keys(service.request_scope, opened.frame_executions()),
+        ]
+        entry = _Subscription(pump, list(dict.fromkeys(keys)), room)
         connection.subscriptions[subscription.subscription_id] = entry
         ack = opened.ack.model_dump(mode="json")
         await self.emit("subscribed", {"request_id": request.request_id, **ack}, to=connection.sid)
@@ -357,10 +454,17 @@ class MissionNamespace(socketio.AsyncNamespace):
                 await self._snapshot(connection, service, opened, notice),
                 to=connection.sid,
             )
+        if subscription.include_descendants or opened.chain is not None:
+            # The full listing first (with a chain's lifecycle); later pages send changes.
+            await self.emit(
+                "lineage",
+                pump.lineage_notice(None, service.lineage_nodes(opened), full=True),
+                to=connection.sid,
+            )
         if room is not None:
             await self.enter_room(connection.sid, room)
             await self._presence(service, mission_ref, room, "presence.joined", connection)
-        self._wakeups.register(entry.keys, pump.wake)
+        self._wakeups.register(tuple(entry.keys), pump.wake)
         entry.task = asyncio.create_task(self._run(connection, entry))
         return {"ok": True, "request_id": request.request_id, **ack}
 
@@ -378,6 +482,7 @@ class MissionNamespace(socketio.AsyncNamespace):
             "covered": notice.covered.model_dump(mode="json"),
             "snapshot_ref": opened.ack.snapshot_ref,
             "projection": None,
+            "chain": service.chain_body(opened),
         }
         run_key = opened.target.run_key
         if notice.stream == "mission_events" and run_key is not None:
@@ -417,8 +522,30 @@ class MissionNamespace(socketio.AsyncNamespace):
 
     async def _command(self, connection: _Connection, data: Any) -> dict[str, Any]:
         command = parse_command(data)
-        receipt = await forward_command(self._app, connection.credential.principal, command)
+        principal = connection.credential.principal
+        receipt = await forward_command(self._app, principal, command)
+        if not receipt["final"]:
+            receipt["following"] = len(connection.followers) < self._limits.max_command_followers
         await self.emit("command_receipt", receipt, to=connection.sid)
+        if receipt.get("following"):
+            sid = connection.sid
+
+            async def emit(body: dict[str, Any]) -> None:
+                await self.emit("command_receipt", body, to=sid)
+
+            task = asyncio.create_task(
+                follow_command_receipts(
+                    self._app,
+                    principal,
+                    command,
+                    MissionCommandReceipt.model_validate(receipt["receipt"]),
+                    emit,
+                    poll_interval=self._limits.pump.poll_interval,
+                    window=self._limits.command_follow_seconds,
+                )
+            )
+            connection.followers.add(task)
+            task.add_done_callback(connection.followers.discard)
         return {"ok": True, **receipt}
 
     async def _resolve_human_task(self, connection: _Connection, data: Any) -> dict[str, Any]:
@@ -475,6 +602,19 @@ class MissionNamespace(socketio.AsyncNamespace):
             await self.disconnect(connection.sid)
         return reason
 
+    def _follow(
+        self, entry: _Subscription, service: MissionStreamService, executions: tuple[Any, ...]
+    ) -> None:
+        """Executions a run or mission frame subscription discovered also wake its pump."""
+
+        added = [
+            key
+            for key in execution_keys(service.request_scope, executions)
+            if key not in entry.keys
+        ]
+        entry.keys.extend(added)
+        self._wakeups.register(tuple(added), entry.pump.wake)
+
     async def _detach(self, connection: _Connection, subscription_id: str) -> None:
         entry = connection.subscriptions.pop(subscription_id, None)
         if entry is None:
@@ -490,7 +630,7 @@ class MissionNamespace(socketio.AsyncNamespace):
             await self._detach(connection, subscription_id)
 
     async def _release(self, connection: _Connection, entry: _Subscription) -> None:
-        self._wakeups.unregister(entry.keys, entry.pump.wake)
+        self._wakeups.unregister(tuple(entry.keys), entry.pump.wake)
         room = entry.presence_room
         if room is None:
             return

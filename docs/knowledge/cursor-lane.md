@@ -1,7 +1,7 @@
 ---
 type: Concept
 title: Cursor lane
-description: The cursor_local and cursor_cloud lane profiles as built: bridge and Cloud Agents API harnesses, workspace leases and branch control, Kernel Hook callback, frame mapping, emulated snapshot, fork and continuation, the describe matrix, and why both profiles are still unqualified and blocked from a live mission.
+description: The cursor_local and cursor_cloud lane profiles as built: bridge and Cloud Agents API harnesses, workspace leases and branch control, Kernel Hook callback, frame mapping, emulated snapshot, fork and continuation, the MP-09 v2 describes, dispatch reconciliation and Cursor launch author, and why both profiles are still unqualified.
 tags: [mission-control, cursor, lanes, harness, implementation, qualification]
 ---
 
@@ -74,33 +74,41 @@ the cloud VM cannot reach the worker's loopback callback, so `cursor_cloud` decl
 run through the API cancel. Usage tokens are `settled_per_turn`, cost
 `estimated_then_settled`.
 
+## MP-09 parity (integrated 2026-10-09)
+
+- **Describe v2.** Both profiles publish implemented `mc.lane_describe.v2` matrices (v1 kept as
+  `CURSOR_*_DESCRIBE_V1`): `approval_modes = (workflow_gate,)`, `compaction_control = unsupported`
+  (`preCompact` is observe-only), `cursor_cloud` `approval_suspension` and MCP enforcement
+  unsupported. `cursor-sdk 1.0.37` exposes `SDKRequestMessage(request_id)` but no API that answers
+  it, so `provider_permission` is refused at admission (`adapters/cursor/qualification.py`).
+- **Dispatch.** Both harnesses implement `reconcile_dispatch` (MP-06): local answers `found` only
+  from this process's memory, otherwise `unknown` (parks `in_doubt`); cloud reconciles a create by
+  the client `agentId` (`404` is an authoritative `not_received`) and a send by `latestRunId`.
+  `reattach` re-supplies the pinned local agent options (`rehydrated`).
+- **Cloud workspace.** `prepare` records a provider workspace lease through
+  `WorkspaceAllocator.allocate_provider_workspace`; `snapshot` records `branch:<branch>@<sha>` on the
+  lease, so a cloud fork can restore it. `GitBranchPublisher.publish` (`scm.py`) commits each later
+  unit's packet on top of the run branch head (previously every later unit of a run read the first
+  unit's packet). `429` with `Retry-After` becomes `ProviderCapacityLimited`; `410 stream_expired`
+  reconciles terminal truth from the run record.
+- **Host gate.** `bridge.host_gate()` refuses `cursor_local` on Windows (`LANE_UNSUPPORTED_OS`) in
+  `prepare`, `start` and the launcher, matching preflight's `LANE_HOSTS`.
+- **Launch.** `application/authoring/cursor_launch.py` seals `mc.cursor_binding.v1` for Cursor
+  stages and Goal Loop roles from mission/v1 and v2 (`providers.cursor_*` of the v2 launch
+  bindings), with the digests `RenderedProjectionSource` re-renders at `prepare`. Hook scripts,
+  plugins, executors and model settings have no slot in the binding and are refused at their
+  pointer, so Missions 2 and 3 do not launch as authored.
+
 ## Qualification and known limits
 
-Both profiles are `qualified=False`. Offline evidence (`make lane-qualify PROFILE=...`)
-replays hand-authored fixtures through the real adapter, `lane.turn` and the reducer and
-holds every `describe()` cell to its behavior; the paid drill that records real fixtures
-and writes the qualification record is owner-run and has not run
-(`docs/qualification/lanes/README.md`). Open items, each stated there or in the owner runbook:
-
-- `cursor_local` needs a Proactor or Unix event loop; the worker uses a selector loop on
-  Windows, so the bridge cannot launch there (run the worker under WSL or Linux). The
-  Windows sandbox is unverified and refused.
-- Fork restore works for `cursor_local` only. `cursor_cloud` expects a
-  `branch:<branch>@<sha>` ref that nothing records yet.
-- The production launch author binds `deep_agents` only, so a manifest node on a Cursor lane
-  fails at its pointer ([mission manifest](mission-manifest.md)).
-- Neither harness implements `DispatchReconcilingLane`, so an ambiguous send parks `in_doubt`
-  rather than being reconciled ([session ownership and dispatch](session-ownership-and-dispatch.md)).
-  `cursor_cloud` is not rewired onto `WorkspaceAllocator.allocate_provider_workspace`. MP-09
-  (parity) is in flight and not integrated.
-- Several SDK and API behaviors are `UNVERIFIED` until the drill (cloud idempotency window,
-  concurrent local `send()`, rules without `setting_sources`, `run.git`, stream retention).
-
-## Specified only
-
-Real recordings that replace the synthetic fixtures, the flip of `qualified` through a
-reviewed release (SPEC-07 section 12), and Windows sandbox qualification. The Claude Agent
-SDK and Codex profiles have no harness on the integrated base ([lanes and harness](lanes-and-harness.md)).
+Both profiles are `qualified=False`. Offline evidence (`make lane-qualify PROFILE=...`,
+`tests/unit/cursor`) and the MP-20 parity rows (Stage Graph, Goal Loop and chain on real
+PostgreSQL and Temporal with FIXTURE bridge and Cloud API responders) never flip it; the paid
+drill (OVE-55) is owner-run and has not run ([cursor_local](../qualification/lanes/cursor_local/README.md),
+[cursor_cloud](../qualification/lanes/cursor_cloud/README.md)). Open: a Linux or WSL 2 worker for
+`cursor_local`; the Windows sandbox; neither rows resolver has bundle custody, so a selected Skill
+cannot resolve; the `UNVERIFIED` items the drill settles (cloud idempotency window, concurrent
+local `send()`, rules without `setting_sources`, `run.git`, stream retention, numeric rate limit).
 
 # Citations
 
@@ -131,7 +139,9 @@ SDK and Codex profiles have no harness on the integrated base ([lanes and harnes
   [interrupt and inject](../../src/mission_control/application/execution/harness/inject.py),
   [lane controls](../../src/mission_control/application/execution/harness/controls.py),
   [describe matrices](../../src/mission_control/application/execution/harness/describe.py),
-  [lane contracts](../../src/mission_control/domain/execution/lanes.py).
+  [lane contracts](../../src/mission_control/domain/execution/lanes.py),
+  [approval coverage and proposed describe](../../src/mission_control/adapters/cursor/qualification.py),
+  [Cursor launch author](../../src/mission_control/application/authoring/cursor_launch.py).
 - Tests: [local lane](../../tests/unit/harness/test_cursor_local.py),
   [cloud lane](../../tests/unit/harness/test_cursor_cloud.py),
   [controls](../../tests/unit/harness/test_cursor_controls.py),
@@ -141,4 +151,9 @@ SDK and Codex profiles have no harness on the integrated base ([lanes and harnes
   [cloud fixtures](../../tests/integration/cursor/test_cursor_cloud_fixtures.py),
   [kernel hook round trip](../../tests/integration/cursor/test_kernel_hook_roundtrip.py),
   [lane controls in PostgreSQL](../../tests/integration/postgres/test_ft_g4_lane_controls_postgres.py),
-  [workspace lease](../../tests/integration/postgres/test_workspace_lease.py).
+  [workspace lease](../../tests/integration/postgres/test_workspace_lease.py),
+  [cloud reconcile](../../tests/unit/cursor/test_cloud_reconcile.py),
+  [cloud workspace and resume](../../tests/unit/cursor/test_cloud_workspace_and_resume.py),
+  [host gate](../../tests/unit/cursor/test_host_gate.py),
+  [Cursor launch](../../tests/unit/authoring/test_manifest_cursor_launch.py),
+  [cloud segment loop on real services](../../tests/integration/cursor/test_mp09_cloud_segment_loop_real_services.py).

@@ -1,0 +1,4 @@
+{"_fixture": "codex/scripts/turn_pressure", "recorded": false, "note": "FIXTURE, not a live recording: a finished turn whose last thread/tokenUsage/updated fills ~77% of a small modelContextWindow (MP-12 soft pressure); hand-written from the pinned codex-cli 0.162.0 app-server v2 schema, replayed by tests/unit/codex/fixture_app_server.py, never by Codex"}
+{"step": "item", "item": {"type": "agentMessage", "id": "item-msg-p1", "text": "Long research turn; the report is not written yet.", "phase": "final_answer"}}
+{"step": "usage", "input": 200000, "output": 10000, "window": 272000}
+{"step": "complete", "status": "completed"}

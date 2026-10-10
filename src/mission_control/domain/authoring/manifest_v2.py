@@ -32,6 +32,7 @@ from mission_control.domain.authoring.manifest import (
     EvaluatorOptimizerNode,
     EventWaitNode,
     GoalLoopNode,
+    HookEntry,
     HumanGateNode,
     Lane,
     ManifestErrorCode,
@@ -50,6 +51,7 @@ from mission_control.domain.authoring.manifest import (
     _issue,
     issues_from_validation_error,
     load_manifest_yaml,
+    parse_manifest,
 )
 from mission_control.domain.execution.lanes import (
     DELIVERY_COMMANDS,
@@ -189,6 +191,9 @@ class RequiredFeatures(ManifestModel):
     controls: tuple[RequiredControl, ...] = ()
     approvals: tuple[ApprovalMode, ...] = ()
     observation: tuple[ObservationFeature, ...] = ()
+    # Every write (shell, file, MCP, network) must be human-gated: admitted only on a lane that
+    # enforces the gate per write family (SPEC-03; `approvals_coverage.admit_gate_coverage`).
+    all_writes_gated: bool = False
 
     @model_validator(mode="after")
     def _unique(self) -> RequiredFeatures:
@@ -263,7 +268,9 @@ class EnvironmentV2(Environment):
                         ManifestErrorCode.UNSUPPORTED_BEHAVIOR,
                     )
                 )
-        elif mission_level and lane is not Lane.DEEP_AGENTS:
+        elif lane is not Lane.DEEP_AGENTS:
+            # At mission level, and on a node that switches lane: a provider lane never runs
+            # on an implied placement (SPEC-02 "Environment profiles").
             blockers.append(
                 _issue(
                     f"{env_pointer}/execution_environment",
@@ -271,6 +278,7 @@ class EnvironmentV2(Environment):
                     "missing_field",
                 )
             )
+        del mission_level
         workspace = self.workspace
         if hosted and workspace is not None:
             if workspace.repo is not None and workspace.repo.path is not None:
@@ -372,7 +380,95 @@ class EnvironmentV2(Environment):
                     "widens_authority",
                 )
             )
+        if (
+            self.continuation is not None
+            and overlay.continuation is not None
+            and "max_session_turns" in overlay.continuation.model_fields_set
+            and self.continuation.max_session_turns is not None
+            and (
+                overlay.continuation.max_session_turns is None
+                or overlay.continuation.max_session_turns > self.continuation.max_session_turns
+            )
+        ):
+            issues.append(
+                _issue(
+                    f"{pointer}/continuation/max_session_turns",
+                    f"continuation.max_session_turns {overlay.continuation.max_session_turns} "
+                    f"widens the inherited limit {self.continuation.max_session_turns}",
+                    "widens_authority",
+                )
+            )
+        if (
+            self.requires is not None
+            and self.requires.all_writes_gated
+            and overlay.requires is not None
+            and "all_writes_gated" in overlay.requires.model_fields_set
+            and not overlay.requires.all_writes_gated
+        ):
+            issues.append(
+                _issue(
+                    f"{pointer}/requires/all_writes_gated",
+                    "requires.all_writes_gated cannot be cleared below the inherited gate",
+                    "widens_authority",
+                )
+            )
+        issues.extend(_egress_issues(self, overlay, pointer))
+        issues.extend(_mandatory_hook_issues(self, overlay, pointer))
         return issues
+
+
+def _egress_issues(parent: Environment, overlay: Environment, pointer: str) -> list[ManifestIssue]:
+    """A child sandbox may only narrow the inherited egress aliases (SPEC-02 inheritance)."""
+
+    if parent.sandbox is None or parent.sandbox.egress is None:
+        return []
+    if overlay.sandbox is None or "egress" not in overlay.sandbox.model_fields_set:
+        return []
+    allowed = set(parent.sandbox.egress)
+    requested = overlay.sandbox.egress
+    if requested is None:
+        return [
+            _issue(
+                f"{pointer}/sandbox/egress",
+                "sandbox.egress cannot be unset below an inherited allowlist",
+                "widens_authority",
+            )
+        ]
+    return [
+        _issue(
+            f"{pointer}/sandbox/egress/{index}",
+            f"egress {alias} is not allowed by the parent environment",
+            "widens_authority",
+        )
+        for index, alias in enumerate(requested)
+        if alias not in allowed
+    ]
+
+
+def _hook_identity(hook: HookEntry) -> tuple[str | None, str | None, str | None]:
+    return (hook.pin, hook.search, hook.kind.value if hook.kind is not None else None)
+
+
+def _mandatory_hook_issues(
+    parent: Environment, overlay: Environment, pointer: str
+) -> list[ManifestIssue]:
+    """A fail-closed hook is mandatory policy: a child list (even an explicit empty one) may
+    clear optional hooks only, never a fail-closed one or its fail-closed flag (SPEC-02;
+    Kernel Hooks are never declared and are always present, ADR-0026)."""
+
+    if overlay.hooks is None or not parent.hooks:
+        return []
+    kept = {_hook_identity(hook) for hook in overlay.hooks if hook.fail_closed}
+    return [
+        _issue(
+            f"{pointer}/hooks",
+            f"the inherited fail-closed hook {hook.as_ or hook.pin or hook.search} "
+            "cannot be removed or made fail-open",
+            "removes_mandatory_policy",
+        )
+        for hook in parent.hooks
+        if hook.fail_closed and _hook_identity(hook) not in kept
+    ]
 
 
 # --- The v2 program tree: the v1 nodes with v2 Environments ------------------------------
@@ -522,6 +618,25 @@ def parse_manifest_yaml_any(text: str) -> tuple[MissionManifest, dict[str, Any]]
     return parse_manifest_any(document), document
 
 
+def parse_manifest_yaml_versioned(text: str) -> tuple[MissionManifest, dict[str, Any]]:
+    """The compile entry point: dispatch on the document's ``manifest`` literal.
+
+    ``mission/v2`` documents parse through :class:`MissionManifestV2`; every other document
+    takes the exact ``mission/v1`` path (:func:`manifest.parse_manifest`, the same function
+    :func:`manifest.parse_manifest_yaml` calls), so v1 results and rejections, including those
+    for an unknown version, are byte-identical to the v1-only parser.
+    """
+
+    document = load_manifest_yaml(text)
+    if document.get("manifest") == MANIFEST_V2_LITERAL:
+        return parse_manifest_any(document), document
+    return parse_manifest(document), document
+
+
+def is_v2(manifest: MissionManifest) -> bool:
+    return isinstance(manifest, MissionManifestV2)
+
+
 def manifest_v2_json_schema() -> dict[str, Any]:
     """The JSON Schema exported to ``contracts/schemas/mc.mission_manifest.v2.json``."""
 
@@ -556,8 +671,10 @@ __all__ = [
     "SetupSelection",
     "WorkspacePolicy",
     "WorkspaceSelectionV2",
+    "is_v2",
     "manifest_v2_json_schema",
     "manifest_v2_json_schema_text",
     "parse_manifest_any",
     "parse_manifest_yaml_any",
+    "parse_manifest_yaml_versioned",
 ]

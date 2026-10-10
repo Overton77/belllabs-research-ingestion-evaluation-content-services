@@ -42,6 +42,7 @@ from mission_control.domain.execution.contracts import (
     PromptTrustClass,
 )
 from mission_control.domain.execution.lanes import CursorExecutionBinding
+from mission_control.domain.programs.runtime_units import goal_unit_workspace_root
 
 CAPABILITY_DRIFT: Final = "CAPABILITY_DRIFT"
 UNSUPPORTED_BEHAVIOR: Final = "UNSUPPORTED_BEHAVIOR"
@@ -222,6 +223,9 @@ def _write(root: Path, relative: PurePosixPath, content: bytes, mode: int) -> No
         resolved_root
     ):
         raise LaneProjectionError(CAPABILITY_DRIFT, f"path escapes the workspace: {relative}")
+    # A lease reused within a run already holds the read-only (0444) file, and an agent may
+    # have planted a symlink there: replace the entry instead of writing through it.
+    target.unlink(missing_ok=True)
     target.write_bytes(content)
     if os.name != "nt":
         target.chmod(mode)
@@ -257,6 +261,10 @@ async def packet_files(
     contract, as workspace-relative paths and bytes (digests checked against the slots)."""
 
     files: list[tuple[str, bytes]] = []
+    # A GoalDirected unit's slots live under its role root (`/goal/<n>/<role>`, RRM-020); the
+    # lane's lease root is that unit's workspace, so both prefixes map to the lease root.
+    unit_root = (goal_unit_workspace_root(operation.runtime_unit) or "").rstrip("/")
+    prefixes = tuple(prefix for prefix in (unit_root, mount_root.rstrip("/")) if prefix)
     for slot in operation.workspace.slot_bindings:
         if not is_context_input_slot(slot):
             continue
@@ -271,8 +279,10 @@ async def packet_files(
                 CAPABILITY_DRIFT, f"context input digest mismatch for {slot.logical_path}"
             )
         logical = slot.logical_path
-        if mount_root and logical.startswith(mount_root.rstrip("/") + "/"):
-            logical = logical[len(mount_root.rstrip("/")) :]
+        for prefix in prefixes:
+            if logical.startswith(prefix + "/"):
+                logical = logical[len(prefix) :]
+                break
         files.append((safe_relative(logical).as_posix(), content))
     files.append((OPERATING_CONTRACT_PATH, operating_contract(operation).encode("utf-8")))
     return files

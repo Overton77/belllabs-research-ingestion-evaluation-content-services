@@ -22,9 +22,9 @@ from mission_control.domain.authoring.manifest import (
     Lane,
     ManifestIssue,
     ManifestRejected,
-    parse_manifest_yaml,
     resolve_environments,
 )
+from mission_control.domain.authoring.manifest_v2 import parse_manifest_yaml_versioned
 from mission_control.domain.authoring.mission_definition import (
     DefinitionCapability,
     manifest_to_definition,
@@ -178,7 +178,8 @@ class ManifestStructureService:
 
     def compile(self, manifest_yaml: str) -> ManifestValidationReport:
         try:
-            manifest, document = parse_manifest_yaml(manifest_yaml)
+            # `mission/v1` takes the exact v1 parser; `mission/v2` the v2 model (MP-02).
+            manifest, document = parse_manifest_yaml_versioned(manifest_yaml)
         except ManifestRejected as rejected:
             return ManifestValidationReport(ok=False, blockers=rejected.issues)
         structure = resolve_environments(manifest, document)

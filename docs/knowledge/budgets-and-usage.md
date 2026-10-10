@@ -1,7 +1,7 @@
 ---
 type: Concept
 title: Budgets and usage
-description: How a budget envelope is reserved before work and settled after, which rules the reducer enforces today, and where the spec's integer-micros and unknown-usage rules are still only specified.
+description: How a budget envelope is reserved before work and settled after, which rules the reducer enforces today, how a Session Lane settlement charges token usage to the run and how provider capacity limits stay separate from budget, and where the spec's integer-micros and unknown-usage rules are still only specified.
 tags: [mission-control, budgets, usage, settlement, implementation]
 ---
 
@@ -68,6 +68,27 @@ there is no `unknown` marker, no native usage identity and no price-sheet refere
 Usage attribution for Agent Server children is computed in
 `adapters/deep_agents/async_subagents.py::attribute_usage` ([lanes](lanes-and-harness.md)).
 
+## Session Lane usage and capacity (multi-provider, 2026-10-09)
+
+A manifest Stage Graph unit reserves only `operation.attempts` and `concurrency.slots` (a Goal
+Loop iteration `goal.iterations`), so a lane settlement that charged only the unit's bound
+dimensions recorded no tokens against the run on any lane (found by MP-20). Now a Session Lane
+settlement charges its closing token usage (`LANE_TOKEN_DIMENSIONS`: `tokens.input`,
+`tokens.output`, `tokens.total`, from `lane_usage_amounts`) once to the dimensions the unit
+reserved or the run declared (`RunBudgetDimensionsPort` in
+`application/execution/operations/operation_execution.py`); unknown usage charges nothing and is
+never recorded as zero, and subagent usage is not counted twice. Open: only the final turn's usage
+is charged (continuation and replaced turns are not summed), cost is not charged, and Deep Agents
+units without a `tokens.total` reservation still charge no tokens. Declared dispositions per lane
+(tokens `settled_per_turn`; Claude and Codex cost `estimated`, Cursor `estimated_then_settled`)
+are in the lane describes ([lanes and harness](lanes-and-harness.md)).
+
+Provider capacity limits are not budget: a lane's `ProviderCapacityLimited` becomes a bounded
+Temporal wait under the deployment's `MISSION_CONTROL_CAPACITY_*` policy, carried on every operation
+request, with no automatic switch to another auth route
+([session ownership and dispatch](session-ownership-and-dispatch.md)). A subscription-backed turn
+still consumes the run's resource budget.
+
 ## Reads
 
 `GET /run-control/v1/runs/{run_id}/budget` returns `BudgetState` on the technical facade;
@@ -88,8 +109,11 @@ the application-scoped prefix exposes budget only through inspection
   [policy contracts](../../src/mission_control/domain/policies/contracts.py),
   [reducer](../../src/mission_control/domain/policies/reducer.py),
   [technical run control](../../src/mission_control/interfaces/http/run_control.py),
-  [usage attribution](../../src/mission_control/adapters/deep_agents/async_subagents.py).
+  [usage attribution](../../src/mission_control/adapters/deep_agents/async_subagents.py),
+  [lane settlement usage](../../src/mission_control/application/execution/operations/operation_execution.py).
 - Tests: [boundary commands, resume re-reserve](../../tests/unit/run_control/test_boundary_commands.py),
   [async child parent budget](../../tests/unit/operations/test_async_child_parent_budget.py),
   [RRM-008 cancellation settlement](../../tests/unit/operations/test_rrm_008_cancellation.py),
-  [atomic family admission](../../tests/unit/run_control/test_atomic_family_admission.py).
+  [atomic family admission](../../tests/unit/run_control/test_atomic_family_admission.py),
+  [lane settlement usage](../../tests/unit/harness/test_lane_settlement_usage.py),
+  [capacity wait on Temporal](../../tests/integration/temporal/test_mp05_limit_wait.py).

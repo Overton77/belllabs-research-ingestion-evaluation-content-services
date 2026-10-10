@@ -17,6 +17,11 @@ HintKey = tuple[str, str, UUID]
 
 def target_keys(request_scope: str, target: ResolvedTarget) -> tuple[HintKey, ...]:
     keys: list[HintKey] = [(request_scope, "mission", target.mission_id)]
+    keys.extend(
+        (request_scope, "mission", member)
+        for member in target.members
+        if member != target.mission_id
+    )
     if target.harness_execution_id is not None:
         keys.append((request_scope, "execution", target.harness_execution_id))
     return tuple(keys)
@@ -57,4 +62,10 @@ class StreamWakeups:
         return len(self._waiters)
 
 
-__all__ = ["HintKey", "StreamWakeups", "hint_keys", "target_keys"]
+def execution_keys(request_scope: str, executions: tuple[UUID, ...]) -> tuple[HintKey, ...]:
+    """Wake-up keys of executions a run or mission frame subscription discovered."""
+
+    return tuple((request_scope, "execution", execution) for execution in executions)
+
+
+__all__ = ["HintKey", "StreamWakeups", "execution_keys", "hint_keys", "target_keys"]

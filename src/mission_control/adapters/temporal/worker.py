@@ -42,6 +42,7 @@ from mission_control.application.programs.goal_directed import (
 from mission_control.application.programs.service import register_stagegraph_family_mutations
 from mission_control.bootstrap.settings import Settings
 from mission_control.domain.execution.heartbeats import OperationHeartbeatPolicy
+from mission_control.domain.execution.usage_admission import LimitWaitPolicy
 
 
 @dataclass(frozen=True)
@@ -80,6 +81,9 @@ class ProductionWorkerSet:
     coordinator: CoordinatorWorkerSet
     operation: Worker
     artifacts: Worker | None
+    # MP-07/08/09: the lane task queues this worker also serves (the `task_queue` a Cursor,
+    # Claude or Codex binding routes its `lane.*` activities to), with the same activities.
+    lanes: tuple[Worker, ...] = ()
 
     @property
     def workers(self) -> tuple[Worker, ...]:
@@ -87,6 +91,7 @@ class ProductionWorkerSet:
             *self.coordinator.workers,
             self.operation,
             *((self.artifacts,) if self.artifacts is not None else ()),
+            *self.lanes,
         )
 
 
@@ -100,6 +105,14 @@ def operation_heartbeat_policy(settings: Settings) -> OperationHeartbeatPolicy:
         ),
         bound_seconds=settings.operation_bound_heartbeat_timeout_seconds,
         deep_agent_segment_loop=settings.mission_control_lane_segment_loop,
+        # MP-05: the finite capacity-wait bounds every operation request carries.
+        capacity_wait=LimitWaitPolicy(
+            max_waits=settings.mission_control_capacity_max_waits,
+            max_total_wait_s=settings.mission_control_capacity_max_total_wait_s,
+            reset_margin_s=settings.mission_control_capacity_reset_margin_s,
+            fallback_backoff_s=settings.mission_control_capacity_fallback_backoff_s,
+            max_backoff_s=settings.mission_control_capacity_max_backoff_s,
+        ),
     )
 
 
@@ -125,6 +138,12 @@ def create_production_workers(
         settings.worker_graceful_shutdown_seconds
     )
     drain = timedelta(seconds=settings.worker_graceful_shutdown_seconds)
+    cognitive_queue = BellLabsTaskQueues.from_base(settings.temporal_task_queue).agent_cognitive
+    lane_queues = tuple(
+        dict.fromkeys(
+            queue for queue in settings.mission_control_lane_task_queues if queue != cognitive_queue
+        )
+    )
     return ProductionWorkerSet(
         coordinator=create_coordinator_workers(
             client,
@@ -134,7 +153,7 @@ def create_production_workers(
         ),
         operation=create_agent_cognitive_worker(
             client,
-            task_queue=BellLabsTaskQueues.from_base(settings.temporal_task_queue).agent_cognitive,
+            task_queue=cognitive_queue,
             activities=composition.operation,
             graceful_shutdown_timeout=drain,
             deployment_config=deployment_config,
@@ -150,6 +169,16 @@ def create_production_workers(
             )
             if composition.artifacts is not None
             else None
+        ),
+        lanes=tuple(
+            create_agent_cognitive_worker(
+                client,
+                task_queue=queue,
+                activities=composition.operation,
+                graceful_shutdown_timeout=drain,
+                deployment_config=deployment_config,
+            )
+            for queue in lane_queues
         ),
     )
 
