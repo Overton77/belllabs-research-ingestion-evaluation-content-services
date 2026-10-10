@@ -3288,6 +3288,11 @@
       "additionalProperties": false,
       "description": "What the workflow needs the lane to actually provide. Admission intersects these\nwith the lane's describe (:mod:`domain.execution.lane_requirements`); a required feature\nthe lane cannot provide is a pointed error, never a silent fallback (V01).",
       "properties": {
+        "all_writes_gated": {
+          "default": false,
+          "title": "All Writes Gated",
+          "type": "boolean"
+        },
         "approvals": {
           "default": [],
           "items": {

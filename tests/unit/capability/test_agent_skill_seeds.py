@@ -37,12 +37,17 @@ from mission_control.domain.capabilities.bundles import (
     parse_skill_frontmatter,
 )
 from mission_control.domain.capabilities.catalog_entry import capability_pin
-from mission_control.domain.capabilities.host_support import HostSupportStatus, LaneProfile
+from mission_control.domain.capabilities.host_support import (
+    UNQUALIFIED_BY_DEFAULT,
+    HostSupportStatus,
+    LaneProfile,
+)
 from mission_control_db_contract.seeds import load_bundles
 
 ROOT = Path(__file__).resolve().parents[3]
 SEEDS = ROOT / "packages" / "mission-control-db-contract" / "seeds"
 NAME_RULE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$")
+LOCAL_PROFILES = set(LaneProfile) - set(UNQUALIFIED_BY_DEFAULT)
 MISSION_CONTROL = {
     "skill.mission-control",
     "skill.mission-control-author",
@@ -124,8 +129,9 @@ def test_rows_pin_custody_paths_and_catalog_pins(app: str) -> None:
             assert definition.bundle_ref.uri == f"capability-bundles://{custody['object_prefix']}"
             assert custody["object_prefix"].startswith(f"{app}/")
             assert definition.manifest_digest == custody["manifest_digest"]
-            # every row is supported on all five lane profiles
-            assert set(definition.host_support.supported_profiles()) == set(LaneProfile)
+            # every row is supported on the five worker-hosted lane profiles; the provider-
+            # hosted profiles are never assumed supported (MP-01, `UNQUALIFIED_BY_DEFAULT`)
+            assert set(definition.host_support.supported_profiles()) == LOCAL_PROFILES
 
 
 def test_upstream_captures_are_verbatim_and_follow_the_frontmatter_rules() -> None:

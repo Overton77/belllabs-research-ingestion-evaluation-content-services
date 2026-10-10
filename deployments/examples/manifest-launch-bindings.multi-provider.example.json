@@ -1,0 +1,697 @@
+{
+  "capabilities": {},
+  "deep_agents": {
+    "agent_profile_ref": {
+      "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "kind": "agent_profile",
+      "lifecycle_status": "published",
+      "logical_id": "agent-profile.local-deep-agents",
+      "payload_ref": null,
+      "revision": 1,
+      "schema_version": "1"
+    },
+    "authority_refs": [
+      "OWNER-SELECT:authority reference of the local deployment"
+    ],
+    "context_schema": {
+      "fields": [
+        {
+          "name": "capability_grant_ref",
+          "reference_only": true,
+          "required": true,
+          "sensitivity": "internal",
+          "value_kind": "string"
+        },
+        {
+          "name": "execution_generation",
+          "reference_only": false,
+          "required": true,
+          "sensitivity": "internal",
+          "value_kind": "integer"
+        },
+        {
+          "name": "operation_attempt",
+          "reference_only": false,
+          "required": true,
+          "sensitivity": "internal",
+          "value_kind": "integer"
+        },
+        {
+          "name": "operation_id",
+          "reference_only": false,
+          "required": true,
+          "sensitivity": "internal",
+          "value_kind": "string"
+        },
+        {
+          "name": "run_id",
+          "reference_only": false,
+          "required": true,
+          "sensitivity": "internal",
+          "value_kind": "string"
+        },
+        {
+          "name": "workspace_handle",
+          "reference_only": true,
+          "required": true,
+          "sensitivity": "internal",
+          "value_kind": "string"
+        }
+      ],
+      "pack_refs": [
+        {
+          "contributor": "base",
+          "digest": "sha256:f893570b6f2bfe47cbed0d2e9d729e67eb024ef687afde82bdb8e255b354084e",
+          "logical_id": "pack.belllabs.base-context",
+          "revision": 1
+        }
+      ],
+      "schema_digest": "sha256:afb22a54847775c2f09e8ce31b3d71582bf84672ccacc1fd0e6afe22d638a686",
+      "schema_id": "context.wp-cp-040",
+      "schema_version": "belllabs.cognitive-context-schema.v1",
+      "subagent_slices": []
+    },
+    "context_values": {
+      "capability_grant_ref": "ref:capability-grant:wp-cp-040",
+      "execution_generation": 1,
+      "operation_attempt": 1,
+      "operation_id": "sandbox-agent",
+      "run_id": "run-operation",
+      "workspace_handle": "handle:workspace:wp-cp-040"
+    },
+    "goal_output_schemas": {
+      "executor": {
+        "revision": 1,
+        "schema_digest": "sha256:2230a49ad6c99845be21e70034608cca1ed2f34297f83b4b469423570575abea",
+        "schema_id": "belllabs.goal-executor-observation.v1",
+        "strict": true
+      },
+      "verifier": {
+        "revision": 1,
+        "schema_digest": "sha256:33043bda0b7a34f2041a8f4517e2860acc44510304253f34b814fa29b233031a",
+        "schema_id": "belllabs.goal-verifier-observation.v1",
+        "strict": true
+      }
+    },
+    "initial_context_manifest": {
+      "digest": "sha256:d62a09fe795554fca378ac0ebc4aa729d3783fbbca85d15fae458ffe01a8bf0c",
+      "entries": []
+    },
+    "placement": {
+      "cancellation_behavior": "cooperative",
+      "checkpoint_behavior": "local_checkpointer",
+      "deepagents_version": "0.7.5",
+      "deployment_id": null,
+      "logical_id": "placement.local-deep-agents",
+      "message_injection_behavior": "invoke_only",
+      "package_versions": {
+        "deepagents": "0.7.5"
+      },
+      "placement": "local_in_worker",
+      "placement_digest": "sha256:867753b9d6061ef39e072ef06290672fecf3b4cd9ba4a9d90b228c0f482f5c01",
+      "python_runtime": "3.12",
+      "qualification_refs": [
+        "QUAL-CP-DEEP-AGENT-MATERIALIZATION"
+      ],
+      "reconnect_behavior": "checkpoint_resume",
+      "revision": 1,
+      "sandbox_backends": [
+        "state"
+      ],
+      "schema_version": "belllabs.deep-agent-placement.v1",
+      "silent_fallback": false,
+      "streaming_behavior": "state_updates",
+      "task_queue": "biotech-research-ingestion-agent-cognitive",
+      "trace_behavior": "langsmith"
+    },
+    "profile": {
+      "async_subagent_policy_refs": [],
+      "async_subagents": [],
+      "backend_ref": {
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "kind": "runtime_profile",
+        "lifecycle_status": "published",
+        "logical_id": "backend.local-deep-agents",
+        "payload_ref": null,
+        "revision": 1,
+        "schema_version": "1"
+      },
+      "checkpointer_ref": {
+        "digest": "sha256:4bee4d60658958a81d7506ffb6fee2c9719913443691a0c7658838882fb65fc8",
+        "kind": "runtime_profile",
+        "lifecycle_status": "published",
+        "logical_id": "checkpointer.wp-cp-040",
+        "payload_ref": null,
+        "revision": 1,
+        "schema_version": "1"
+      },
+      "cognitive_context_pack_refs": [
+        {
+          "contributor": "base",
+          "digest": "sha256:f893570b6f2bfe47cbed0d2e9d729e67eb024ef687afde82bdb8e255b354084e",
+          "logical_id": "pack.belllabs.base-context",
+          "revision": 1
+        }
+      ],
+      "cognitive_state_pack_refs": [
+        {
+          "contributor": "base",
+          "digest": "sha256:ded69ce21ace0ce87819fbe10c412df1733dfe2b9f468636219232d8a01a5a5f",
+          "logical_id": "pack.belllabs.base-state",
+          "revision": 1
+        },
+        {
+          "contributor": "middleware",
+          "digest": "sha256:e586afc3240c5eedb6d4e1f26809d15eff0dc4fc8c3575f81de8e7f2e54efedb",
+          "logical_id": "pack.deepagents.skills-middleware",
+          "revision": 1
+        }
+      ],
+      "compatible_placement_ids": [
+        "placement.local-deep-agents"
+      ],
+      "context_assembly_ref": {
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "kind": "workflow_configuration",
+        "lifecycle_status": "published",
+        "logical_id": "context.local-deep-agents",
+        "payload_ref": null,
+        "revision": 1,
+        "schema_version": "1"
+      },
+      "delegation_ceiling": {
+        "allowed_models": [],
+        "allowed_modes": [],
+        "budget_limits": {},
+        "data_scope_refs": [],
+        "max_concurrency": 0,
+        "max_delegations": 0,
+        "max_depth": 0,
+        "mcp_server_ids": [],
+        "network_hosts": [],
+        "tool_ids": []
+      },
+      "framework_family": "deepagents",
+      "hitl_policy_ref": null,
+      "limits": {},
+      "logical_id": "agent.local-deep-agents",
+      "mcp_servers": [],
+      "memory_refs": [],
+      "middleware": [],
+      "model": {
+        "model_name": "OWNER-SELECT:OpenAI model name served as model.wp-cp-040",
+        "provider": "openai",
+        "ref": {
+          "digest": "sha256:9114734fb63922a805011bfee5b9c003cf6dffca30e08f81133e7129c91b41d4",
+          "kind": "model",
+          "lifecycle_status": "published",
+          "logical_id": "model.wp-cp-040",
+          "payload_ref": null,
+          "revision": 1,
+          "schema_version": "1"
+        },
+        "settings": {}
+      },
+      "profile_digest": "sha256:9c99b090c5719dda7c4da13bc0802beb7cd06ad13cf2fedd8b06dce3611c6437",
+      "prompt_refs": [
+        {
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "kind": "prompt",
+          "lifecycle_status": "published",
+          "logical_id": "prompt.local-deep-agents",
+          "payload_ref": null,
+          "revision": 1,
+          "schema_version": "1"
+        }
+      ],
+      "revision": 1,
+      "sandbox": {
+        "backend": "state",
+        "credential_refs": [],
+        "idle_ttl_seconds": 300,
+        "ref": {
+          "digest": "sha256:7f6d8e74cbcc990dccfc8fcf4cf80aceeaab2ffedb6cc31fc34a969f3e5e0e79",
+          "kind": "sandbox_profile",
+          "lifecycle_status": "published",
+          "logical_id": "sandbox.wp-cp-040",
+          "payload_ref": null,
+          "revision": 1,
+          "schema_version": "1"
+        },
+        "runtime_digest": "sha256:ca7017e2f17d4527316e485c1b6b97ca15d861f1f1115c7683660efe1bef5063",
+        "snapshot_ref": null
+      },
+      "schema_version": "belllabs.deep-agent-profile.v1",
+      "skills": [],
+      "store_ref": {
+        "digest": "sha256:a7aa7349afd6c033fa9ededa8fcf1be0cd87638d59b58bf42d208316057f1d7f",
+        "kind": "memory_policy",
+        "lifecycle_status": "published",
+        "logical_id": "store.wp-cp-040",
+        "payload_ref": null,
+        "revision": 1,
+        "schema_version": "1"
+      },
+      "structured_output_ref": null,
+      "sync_subagents": [],
+      "tools": [],
+      "tracing_policy_ref": {
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "kind": "evaluation_profile",
+        "lifecycle_status": "published",
+        "logical_id": "trace.local-deep-agents",
+        "payload_ref": null,
+        "revision": 1,
+        "schema_version": "1"
+      }
+    },
+    "redaction_policy_ref": "OWNER-SELECT:redaction policy reference",
+    "sensitive_data_policy_ref": "OWNER-SELECT:sensitive-data policy reference",
+    "snapshot_policy_ref": "OWNER-SELECT:snapshot policy reference",
+    "state_schema": {
+      "channels": [
+        {
+          "name": "artifact_index",
+          "reducer": "merge_by_key",
+          "sensitivity": "internal",
+          "value_kind": "map",
+          "value_schema_ref": "schema:artifact-index@1"
+        },
+        {
+          "name": "child_result_index",
+          "reducer": "append_unique_by_id",
+          "sensitivity": "internal",
+          "value_kind": "append_list",
+          "value_schema_ref": "schema:child-result-index@1"
+        },
+        {
+          "name": "context_manifest",
+          "reducer": "replace",
+          "sensitivity": "internal",
+          "value_kind": "object",
+          "value_schema_ref": "schema:context-manifest@1"
+        },
+        {
+          "name": "skills_load_errors",
+          "reducer": "replace",
+          "sensitivity": "internal",
+          "value_kind": "string_list",
+          "value_schema_ref": "schema:deepagents-skill-load-errors@0.7.5"
+        },
+        {
+          "name": "skills_metadata",
+          "reducer": "replace",
+          "sensitivity": "internal",
+          "value_kind": "append_list",
+          "value_schema_ref": "schema:deepagents-skill-metadata@0.7.5"
+        }
+      ],
+      "deepagents_version": "0.7.5",
+      "pack_refs": [
+        {
+          "contributor": "base",
+          "digest": "sha256:ded69ce21ace0ce87819fbe10c412df1733dfe2b9f468636219232d8a01a5a5f",
+          "logical_id": "pack.belllabs.base-state",
+          "revision": 1
+        },
+        {
+          "contributor": "middleware",
+          "digest": "sha256:e586afc3240c5eedb6d4e1f26809d15eff0dc4fc8c3575f81de8e7f2e54efedb",
+          "logical_id": "pack.deepagents.skills-middleware",
+          "revision": 1
+        }
+      ],
+      "reducer_registry_digest": "sha256:eab1fe8a701bd2bcfdb4e74e3ec9da2869dd39282de6d7e3d6b4c774fbf578ee",
+      "schema_digest": "sha256:23a84e8cd70ae342039ffd6ea0cb74f8b721e7434f8a57d9eb67ffb689cefceb",
+      "schema_id": "state.wp-cp-040",
+      "schema_version": "belllabs.cognitive-state-schema.v1",
+      "subagent_slices": []
+    },
+    "tracing_policy_ref": "OWNER-SELECT:tracing policy reference",
+    "workspace": {
+      "environment_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "image_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "network_policy": "none",
+      "package_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "provider": "OWNER-SELECT:workspace provider",
+      "runtime_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  },
+  "model_profiles": {
+    "frontier.default": {
+      "model_name": "OWNER-SELECT:OpenAI model name served as model.wp-cp-040",
+      "provider": "openai",
+      "ref": {
+        "digest": "sha256:9114734fb63922a805011bfee5b9c003cf6dffca30e08f81133e7129c91b41d4",
+        "kind": "model",
+        "lifecycle_status": "published",
+        "logical_id": "model.wp-cp-040",
+        "payload_ref": null,
+        "revision": 1,
+        "schema_version": "1"
+      },
+      "settings": {}
+    },
+    "frontier.long_context": {
+      "model_name": "OWNER-SELECT:OpenAI model name served as model.wp-cp-040",
+      "provider": "openai",
+      "ref": {
+        "digest": "sha256:9114734fb63922a805011bfee5b9c003cf6dffca30e08f81133e7129c91b41d4",
+        "kind": "model",
+        "lifecycle_status": "published",
+        "logical_id": "model.wp-cp-040",
+        "payload_ref": null,
+        "revision": 1,
+        "schema_version": "1"
+      },
+      "settings": {}
+    }
+  },
+  "providers": {
+    "claude_agent_sdk": {
+      "agent_profile_ref": {
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "kind": "agent_profile",
+        "lifecycle_status": "published",
+        "logical_id": "agent-profile.local-claude-agent-sdk",
+        "payload_ref": null,
+        "revision": 1,
+        "schema_version": "1"
+      },
+      "auth_profiles": {
+        "claude-sdk-owner-subscription": {
+          "account_ref": null,
+          "billing_mode": "subscription",
+          "entitlement_refs": [],
+          "profile": "claude-sdk-owner-subscription"
+        }
+      },
+      "budgets": {
+        "max_segments": 64,
+        "max_turns": 16,
+        "token_ceiling": 400000,
+        "wall_clock_s": 7200
+      },
+      "host_profiles": {
+        "worker.linux.default": {
+          "host_profile": "worker.linux.default",
+          "kind": "local_workspace",
+          "network_policy_ref": "OWNER-SELECT:worker egress policy reference",
+          "readiness": "unverified",
+          "secret_refs": [],
+          "timeout_ceiling_s": 7200
+        }
+      },
+      "model_profiles": {
+        "claude.default": {
+          "context_window_tokens": null,
+          "model_id": "OWNER-SELECT:Claude model ID served by the owner's Claude Code route",
+          "profile": "claude.default"
+        }
+      },
+      "pins": {
+        "cli.claude_code": "2.1.294",
+        "sdk.claude_agent_sdk": "0.2.165"
+      },
+      "provider_options": {
+        "allowed_tools": [],
+        "cli_path_ref": null,
+        "disallowed_tools": [],
+        "max_turns": null,
+        "permission_mode": "default",
+        "provider": "claude_agent_sdk",
+        "setting_sources": [
+          "project"
+        ]
+      },
+      "sensitive_data_policy_ref": "OWNER-SELECT:sensitive-data policy reference",
+      "snapshot_policy_ref": "OWNER-SELECT:snapshot policy reference",
+      "task_queue": "biotech-research-ingestion-lane-claude-agent-sdk",
+      "tracing_policy_ref": "OWNER-SELECT:tracing policy reference",
+      "workspace": {
+        "environment_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "image_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "network_policy": "none",
+        "package_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "provider": "OWNER-SELECT:workspace provider",
+        "runtime_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    "codex": {
+      "agent_profile_ref": {
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "kind": "agent_profile",
+        "lifecycle_status": "published",
+        "logical_id": "agent-profile.local-codex",
+        "payload_ref": null,
+        "revision": 1,
+        "schema_version": "1"
+      },
+      "auth_profiles": {
+        "codex-owner-chatgpt": {
+          "account_ref": null,
+          "billing_mode": "subscription",
+          "entitlement_refs": [],
+          "profile": "codex-owner-chatgpt"
+        }
+      },
+      "budgets": {
+        "max_segments": 64,
+        "max_turns": 16,
+        "token_ceiling": 400000,
+        "wall_clock_s": 7200
+      },
+      "host_profiles": {
+        "worker.linux.wsl": {
+          "host_profile": "worker.linux.wsl",
+          "kind": "local_workspace",
+          "network_policy_ref": "OWNER-SELECT:worker egress policy reference",
+          "readiness": "unverified",
+          "secret_refs": [],
+          "timeout_ceiling_s": 7200
+        }
+      },
+      "model_profiles": {
+        "codex.default": {
+          "context_window_tokens": null,
+          "model_id": "OWNER-SELECT:Codex model ID the owner's ChatGPT account admits",
+          "profile": "codex.default"
+        }
+      },
+      "pins": {
+        "cli.codex": "0.162.0",
+        "schema.app_server_v2": "0bf5254bede109d4ae03ce2e81372e4c93a30b359c0749ec7dce7a9382a7f857"
+      },
+      "provider_options": {
+        "app_server_schema_version": "v2@0.162.0",
+        "approval_policy": "on-request",
+        "provider": "codex_app_server",
+        "reasoning_effort": null,
+        "sandbox_mode": "workspace-write"
+      },
+      "sensitive_data_policy_ref": "OWNER-SELECT:sensitive-data policy reference",
+      "snapshot_policy_ref": "OWNER-SELECT:snapshot policy reference",
+      "task_queue": "biotech-research-ingestion-lane-codex",
+      "tracing_policy_ref": "OWNER-SELECT:tracing policy reference",
+      "workspace": {
+        "environment_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "image_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "network_policy": "none",
+        "package_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "provider": "OWNER-SELECT:workspace provider",
+        "runtime_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    "cursor_cloud": {
+      "agent_profile_ref": {
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "kind": "agent_profile",
+        "lifecycle_status": "published",
+        "logical_id": "agent-profile.cloud-cursor",
+        "payload_ref": null,
+        "revision": 1,
+        "schema_version": "1"
+      },
+      "auth_profiles": {
+        "cursor-cloud-key": {
+          "account_ref": null,
+          "billing_mode": "unknown",
+          "entitlement_refs": [],
+          "profile": "cursor-cloud-key"
+        }
+      },
+      "budgets": {
+        "max_segments": 64,
+        "max_turns": 16,
+        "wall_clock_s": 7200
+      },
+      "environments": {
+        "cursor-cloud.default": {
+          "environment": {
+            "environment_ref": "cursor-cloud.default",
+            "expected_revision": "OWNER-SELECT:attested Cursor environment revision",
+            "kind": "provider_hosted",
+            "provider": "cursor",
+            "readiness": "unverified",
+            "schema_version": "mc.environment_binding.v1",
+            "secret_refs": [],
+            "timeout_ceiling_s": 7200
+          },
+          "options": {
+            "auto_create_pr": false,
+            "env_vars_ref": null,
+            "environment": "cloud",
+            "metadata": {}
+          }
+        }
+      },
+      "mode": "agent",
+      "model_profiles": {
+        "cursor.default": {
+          "context_window_tokens": null,
+          "model_id": "OWNER-SELECT:Cursor model ID the owner's Cursor account admits",
+          "profile": "cursor.default"
+        }
+      },
+      "pins": {
+        "bridge": "1.0.37",
+        "cloud_api": "v1",
+        "cursor_sdk": "1.0.37",
+        "protocol": "sdk.v1"
+      },
+      "repositories": {
+        "https://github.com/Overton77/mission-control-fixture": {
+          "base_refs": [
+            "main"
+          ],
+          "branch_prefix": "mc/",
+          "repo_url": "https://github.com/Overton77/mission-control-fixture"
+        }
+      },
+      "sensitive_data_policy_ref": "OWNER-SELECT:sensitive-data policy reference",
+      "snapshot_policy_ref": "OWNER-SELECT:snapshot policy reference",
+      "task_queue": "biotech-research-ingestion-lane-cursor-cloud",
+      "tracing_policy_ref": "OWNER-SELECT:tracing policy reference",
+      "v1_environment": "cursor-cloud.default",
+      "workspace": {
+        "environment_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "image_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "network_policy": "none",
+        "package_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "provider": "OWNER-SELECT:workspace provider",
+        "runtime_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    "cursor_local": {
+      "agent_profile_ref": {
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "kind": "agent_profile",
+        "lifecycle_status": "published",
+        "logical_id": "agent-profile.local-cursor",
+        "payload_ref": null,
+        "revision": 1,
+        "schema_version": "1"
+      },
+      "auth_profiles": {
+        "cursor-local-key": {
+          "account_ref": null,
+          "billing_mode": "unknown",
+          "entitlement_refs": [],
+          "profile": "cursor-local-key"
+        }
+      },
+      "budgets": {
+        "max_segments": 64,
+        "max_turns": 16,
+        "wall_clock_s": 7200
+      },
+      "disallowed_tools": [],
+      "hook_callback": {
+        "listen": "127.0.0.1:47555",
+        "token_ttl_s": 14400
+      },
+      "host_profiles": {
+        "worker.linux.wsl": {
+          "host_profile": "worker.linux.wsl",
+          "kind": "local_workspace",
+          "network_policy_ref": "OWNER-SELECT:worker egress policy reference",
+          "readiness": "unverified",
+          "secret_refs": [],
+          "timeout_ceiling_s": 7200
+        }
+      },
+      "lease_root": null,
+      "mode": "agent",
+      "model_profiles": {
+        "cursor.default": {
+          "context_window_tokens": null,
+          "model_id": "OWNER-SELECT:Cursor model ID the owner's Cursor account admits",
+          "profile": "cursor.default"
+        }
+      },
+      "pins": {
+        "bridge": "1.0.37",
+        "cloud_api": "v1",
+        "cursor_sdk": "1.0.37",
+        "protocol": "sdk.v1"
+      },
+      "repositories": {
+        "/srv/repos/mission-control-fixture": {
+          "base_refs": [
+            "main"
+          ],
+          "branch_prefix": "mc/",
+          "repo_url": "/srv/repos/mission-control-fixture"
+        }
+      },
+      "sandbox_enabled": false,
+      "sensitive_data_policy_ref": "OWNER-SELECT:sensitive-data policy reference",
+      "snapshot_policy_ref": "OWNER-SELECT:snapshot policy reference",
+      "task_queue": "biotech-research-ingestion-lane-cursor-local",
+      "tracing_policy_ref": "OWNER-SELECT:tracing policy reference",
+      "workspace": {
+        "environment_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "image_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "network_policy": "none",
+        "package_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "provider": "OWNER-SELECT:workspace provider",
+        "runtime_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    }
+  },
+  "sandbox_profiles": {
+    "ingestion.standard": {
+      "backend": "state",
+      "credential_refs": [],
+      "idle_ttl_seconds": 300,
+      "ref": {
+        "digest": "sha256:7f6d8e74cbcc990dccfc8fcf4cf80aceeaab2ffedb6cc31fc34a969f3e5e0e79",
+        "kind": "sandbox_profile",
+        "lifecycle_status": "published",
+        "logical_id": "sandbox.wp-cp-040",
+        "payload_ref": null,
+        "revision": 1,
+        "schema_version": "1"
+      },
+      "runtime_digest": "sha256:ca7017e2f17d4527316e485c1b6b97ca15d861f1f1115c7683660efe1bef5063",
+      "snapshot_ref": null
+    },
+    "research.standard": {
+      "backend": "state",
+      "credential_refs": [],
+      "idle_ttl_seconds": 300,
+      "ref": {
+        "digest": "sha256:7f6d8e74cbcc990dccfc8fcf4cf80aceeaab2ffedb6cc31fc34a969f3e5e0e79",
+        "kind": "sandbox_profile",
+        "lifecycle_status": "published",
+        "logical_id": "sandbox.wp-cp-040",
+        "payload_ref": null,
+        "revision": 1,
+        "schema_version": "1"
+      },
+      "runtime_digest": "sha256:ca7017e2f17d4527316e485c1b6b97ca15d861f1f1115c7683660efe1bef5063",
+      "snapshot_ref": null
+    }
+  },
+  "schema_version": "mc.manifest_launch_bindings.v2"
+}

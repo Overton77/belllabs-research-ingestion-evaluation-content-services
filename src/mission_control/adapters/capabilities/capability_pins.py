@@ -10,6 +10,21 @@ what it observed. Credentials appear only as environment reference names.
 
 Locators are workspace-relative (`workspace://...`, the parent of `PROJECT_ROOT`), so the
 same pin file is valid on every host that lays the workspace out the same way.
+
+Resource-root contract (`workspace_path`). A locator is lexically safe (no `..`, absolute,
+drive, device or ADS spelling) and must resolve, after every link is followed, inside its
+containment root:
+
+- for a locator under a declared resource root (`WORKSPACE_RESOURCE_ROOTS`: `.agents`,
+  `.tools`), the real path of `<workspace>/<root>`. That top-level entry may be a directory
+  link (the BellLabs layout keeps `platform/.agents` and `platform/.tools` as junctions to
+  the Biotech-owned directories), but its target must keep the resource root's name, and
+  nothing beneath it may resolve outside that target;
+- for any other locator, the real path of the workspace itself, so every other link that
+  leaves the workspace (including undeclared top-level links) is refused.
+
+The function returns the verified real path, so bundle readers that refuse links in a path
+(`directory_files`) read exactly what was checked.
 """
 
 from __future__ import annotations
@@ -46,6 +61,9 @@ WORKSPACE_SCHEME = "workspace://"
 PIN_SCHEMA_VERSION: Literal["belllabs.capability-pins.v1"] = "belllabs.capability-pins.v1"
 MAX_SKILL_BUNDLE_FILES = 64
 MAX_SKILL_FILE_BYTES = 256_000
+# Top-level workspace entries that may be relocated behind a directory link (see module
+# docstring). Adding a name here widens what a pin file can address; it is a reviewed change.
+WORKSPACE_RESOURCE_ROOTS: frozenset[str] = frozenset({".agents", ".tools"})
 
 
 class CapabilityPinError(ValueError):
@@ -371,16 +389,27 @@ def workspace_root() -> Path:
     return PROJECT_ROOT.parent
 
 
-def workspace_path(locator: str) -> Path:
+def workspace_path(locator: str, *, root: Path | None = None) -> Path:
+    """The verified real path of a `workspace://` locator under `root` (default: the
+    checkout's parent). Enforces the resource-root contract in the module docstring."""
+
     if not locator.startswith(WORKSPACE_SCHEME):
         raise CapabilityPinError(f"locator is not workspace-relative: {locator}")
     raw = locator.removeprefix(WORKSPACE_SCHEME)
+    base = workspace_root() if root is None else root
     try:
-        safe_relative_path(raw)
-        result = workspace_root().joinpath(*PurePosixPath(raw).parts)
-        if not result.resolve().is_relative_to(workspace_root().resolve()):
-            raise BundleError("locator escapes workspace through a link")
-    except BundleError as error:
+        parts = PurePosixPath(safe_relative_path(raw)).parts
+        workspace = base.resolve()
+        containment = workspace
+        if parts[0] in WORKSPACE_RESOURCE_ROOTS:
+            containment = (base / parts[0]).resolve()
+            relocated = not containment.is_relative_to(workspace)
+            if relocated and containment.name != parts[0]:
+                raise BundleError("resource root links to a directory of another name")
+        result = base.joinpath(*parts).resolve()
+        if not result.is_relative_to(containment):
+            raise BundleError("locator escapes its containment root through a link")
+    except (BundleError, OSError, RuntimeError) as error:
         raise CapabilityPinError(f"locator escapes or aliases the workspace: {locator}") from error
     return result
 

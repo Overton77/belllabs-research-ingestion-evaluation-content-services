@@ -1,7 +1,7 @@
 ---
 type: Concept
 title: Context, state handoff and continuation
-description: The sealed Context Packet and deterministic packer, the stage, iteration, chain and queued-instruction handoffs that use it, the context selection record, checkpoint lineage and in-doubt classification, and the continuation checkpoint and service with their current limitation (sealing and transfer are built but not composed or called by a family workflow).
+description: The sealed Context Packet and deterministic packer, the stage, iteration, chain and queued-instruction handoffs that use it, the context selection record, checkpoint lineage and in-doubt classification, and the continuation checkpoint and service, composed for Session Lanes as a persisted phase machine the operation workflow drives (MP-12, ADR-0041).
 tags: [mission-control, context, checkpoints, continuation, compaction, implementation]
 ---
 
@@ -58,7 +58,8 @@ records (`adapters/postgres/context/artifact_bytes.py`: `workspace-candidate://`
 
 - **Stage handoff** (FT-B2): `application/programs/service.py` calls `pack_for_stage` before a
   Stage Graph operation is admitted, so a downstream stage sees accepted outputs of upstream
-  stages as `/inputs/...` files with digests.
+  stages as `/inputs/...` files with digests; slot names pass `packet_binding_name` and authored
+  `inputs[].name/expand` arrive as `StageAuthoredInput` (`application/programs/stage_inputs.py`).
 - **Iteration handoff** (FT-B3): `application/programs/goal_directed.py` calls
   `pack_for_iteration`, replacing the stringified handoff between Goal Loop iterations.
 - **Queued instructions and injects** (FT-F1, FT-F2): mailbox entries claimed at a boundary
@@ -132,12 +133,10 @@ hydrator; compaction is observed on Deep Agents and governed by retry, fallback,
 count, cost and no-progress policies. Detail is in
 [continuation checkpoint](continuation-checkpoint.md).
 
-**Current limitation.** `ContinuationService` is not composed in the API or the worker, the
-`continuation.seal`, `continuation.transfer` and `continuation.release` activities are registered
-on no worker queue, and no family workflow calls them. A `request_continuation` command is
-recorded as `session.continuation_requested`, but no worker seals a checkpoint or provisions the
-fresh session. The canonical checkpoint manifest of RUNTIME-CONTRACTS.md remains a specification;
-runtime (LangGraph) checkpoints are evidence only.
+**Composed since 2026-10-09 (MP-12, ADR-0041).** For Session Lanes the operation workflow drives a
+persisted continuation phase machine after `lane.turn` stops at a pending transfer, with hydrators
+registered for Cursor, Claude and Codex; a Deep Agents request is recorded only. The canonical
+checkpoint manifest of RUNTIME-CONTRACTS.md remains a specification.
 
 # Citations
 
@@ -147,7 +146,8 @@ runtime (LangGraph) checkpoints are evidence only.
   `../mission-control-general/general-mission-control/RUNTIME-CONTRACTS.md` (checkpoint
   manifest paragraph).
 - ADRs: [0007](../adr/0007-authoritative-state-separate-from-advisory-memory.md),
-  [0027](../adr/0027-context-packet-tiers-and-workspace-materialization.md).
+  [0027](../adr/0027-context-packet-tiers-and-workspace-materialization.md),
+  [0041](../adr/0041-continuation-is-a-persisted-phase-machine-driven-by-the-operation-workflow.md) (proposed).
 - Code: [Context Packet and packer](../../src/mission_control/domain/context/packet.py),
   [pack service](../../src/mission_control/application/context/pack_service.py),
   [checkpoint lineage](../../src/mission_control/domain/execution/checkpoint_lineage.py),

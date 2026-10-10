@@ -347,10 +347,16 @@ async def test_publishing_is_idempotent_per_branch(tmp_path: Path) -> None:
     first = await publisher.publish(
         repository=str(remote), base_ref="main", branch="mc/run-1", files=[("a.txt", b"a")]
     )
-    second = await publisher.publish(
+    retried = await publisher.publish(
+        repository=str(remote), base_ref="main", branch="mc/run-1", files=[("a.txt", b"a")]
+    )
+    assert retried.head == first.head and retried.base_commit == first.base_commit
+    # MP-20: a later unit of the same run publishes its own files on top of the run branch
+    # (production used to return the first unit's head, so later units read its packet).
+    later = await publisher.publish(
         repository=str(remote), base_ref="main", branch="mc/run-1", files=[("a.txt", b"other")]
     )
-    assert first.head == second.head and first.base_commit == second.base_commit
+    assert later.head != first.head and later.base_commit == first.base_commit
 
 
 def test_describe_is_the_declared_unqualified_cloud_matrix(tmp_path: Path) -> None:

@@ -591,6 +591,18 @@ class LaneFileSupport(_Contract):
     """Prefix of default materialization paths (a GoalDirected role root, for example)."""
 
 
+_BINDING_NAME_DISALLOWED = re.compile(r"[^A-Za-z0-9_.-]")
+
+
+def packet_binding_name(slot_id: str) -> str:
+    """The packet binding name of a consumer input slot id: characters outside
+    ``[A-Za-z0-9_.-]`` become ``-`` (a manifest dependency slot ``from:<producer>`` binds as
+    ``from-<producer>``); a name already valid is unchanged."""
+
+    name = _BINDING_NAME_DISALLOWED.sub("-", slot_id).lstrip("-_.") or "input"
+    return name[:128]
+
+
 class ContextBinding(_Contract):
     """A consumer input binding in declaration order."""
 

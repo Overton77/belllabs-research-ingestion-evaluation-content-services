@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import platform
+import sys
 from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -51,6 +52,71 @@ class SandboxUnsupported(BridgeError):
 
 class RunNotCancellable(BridgeError):
     """The run is already terminal (`409 run_not_cancellable`)."""
+
+
+class HostUnsupported(BridgeError):
+    """The worker host cannot spawn the SDK bridge (MP-09 host gate): on Windows the worker
+    runs a SelectorEventLoop (psycopg, `bootstrap/worker.run_cli`) and asyncio spawns
+    subprocesses only on the Proactor loop (python.org asyncio-platforms#windows); run the
+    `cursor_local` worker under WSL 2 or Linux (OWNER-FIXTURE-RUNBOOK B6 / 2.8)."""
+
+
+LANE_UNSUPPORTED_OS = "LANE_UNSUPPORTED_OS"
+_SUPPORTED_SYSTEMS = frozenset({"Linux", "Darwin"})
+_WINDOWS_REASON = (
+    "the worker runs a SelectorEventLoop on Windows (psycopg, bootstrap/worker.run_cli) and "
+    "asyncio on Windows spawns subprocesses only on the Proactor loop"
+)
+_WSL_REMEDY = (
+    "run the cursor_local worker under WSL 2 or Linux "
+    "(docs/qualification/lanes/cursor_local/README.md, OWNER-FIXTURE-RUNBOOK 2.8)"
+)
+
+
+@dataclass(frozen=True)
+class HostGate:
+    """What the `cursor_local` host gate observed and decided (preflight and launch agree)."""
+
+    system: str
+    release: str
+    event_loop: str
+    wsl: bool
+    supported: bool
+    code: str | None
+    reason: str
+    remedy: str
+
+    @property
+    def message(self) -> str:
+        return f"{self.reason}; {self.remedy}" if not self.supported else "host supported"
+
+
+def _running_loop_name() -> str:
+    try:
+        return type(asyncio.get_running_loop()).__name__
+    except RuntimeError:
+        return "none"
+
+
+def host_gate(
+    *, system: str | None = None, release: str | None = None, event_loop: str | None = None
+) -> HostGate:
+    """The MP-22 lane-host rule (`bootstrap/preflight.LANE_HOSTS["cursor_local"]`) applied where
+    the lane spawns: Linux (including WSL 2) and macOS are supported; Windows is refused
+    whatever the loop, because the production worker pins the selector loop there and the
+    Windows sandbox is UNVERIFIED (docs/qualification/lanes/README.md)."""
+
+    name = system if system is not None else platform.system()
+    rel = release if release is not None else platform.release()
+    loop = event_loop if event_loop is not None else _running_loop_name()
+    lowered = rel.lower()
+    wsl = name == "Linux" and ("microsoft" in lowered or "wsl" in lowered)
+    if name in _SUPPORTED_SYSTEMS:
+        return HostGate(name, rel, loop, wsl, True, None, "supported host", "")
+    reason = _WINDOWS_REASON if name == "Windows" else f"{name} is not a qualified bridge host"
+    if name == "Windows" and loop not in {"SelectorEventLoop", "none"}:
+        reason += f" (observed {loop}; the Windows sandbox and bridge stay UNVERIFIED)"
+    return HostGate(name, rel, loop, wsl, False, LANE_UNSUPPORTED_OS, reason, _WSL_REMEDY)
 
 
 @dataclass(frozen=True)
@@ -339,7 +405,18 @@ class SdkBridgeLauncher:
         # stays refused until a recorded qualification says otherwise (SPEC-07 section 12).
         return platform.system() in {"Linux", "Darwin"}
 
+    def host_gate(self) -> HostGate:
+        """The host gate the lane consults before it leases or spawns anything (MP-09)."""
+
+        return host_gate()
+
     async def launch(self, *, workspace: Path, state_root: Path) -> CursorLocalBridge:
+        gate = self.host_gate()
+        if not gate.supported:
+            # Enforced where the lane spawns: never launch a bridge on an unsupported host.
+            raise HostUnsupported(f"{gate.code}: {gate.message}")
+        if sys.platform == "win32":  # pragma: no cover - refused above; defensive
+            raise HostUnsupported(f"{LANE_UNSUPPORTED_OS}: {_WINDOWS_REASON}; {_WSL_REMEDY}")
         from cursor_sdk.asyncio import AsyncClient
 
         await asyncio.to_thread(state_root.mkdir, parents=True, exist_ok=True)
@@ -356,12 +433,15 @@ class SdkBridgeLauncher:
 __all__ = [
     "BRIDGE_PROTOCOL",
     "CURSOR_SDK_PIN",
+    "LANE_UNSUPPORTED_OS",
     "AgentBusy",
     "BridgeError",
     "BridgeEvent",
     "CursorBridgeLauncher",
     "CursorLocalBridge",
     "FeatureUnavailable",
+    "HostGate",
+    "HostUnsupported",
     "LocalAgentSpec",
     "RunNotCancellable",
     "RunNotFound",
@@ -371,5 +451,6 @@ __all__ = [
     "SdkLocalBridge",
     "UsageState",
     "envelope_from_event",
+    "host_gate",
     "run_state_from_snapshot",
 ]

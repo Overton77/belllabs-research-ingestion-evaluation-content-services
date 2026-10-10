@@ -13,6 +13,7 @@ from typing import Literal
 
 import asyncpg
 
+from mission_control.adapters.postgres.approvals.tasks import PostgresApprovalTaskRepository
 from mission_control.adapters.postgres.async_subagents.async_subagents import (
     PostgresAsyncSubagentAuthority,
 )
@@ -27,6 +28,7 @@ from mission_control.adapters.postgres.control_plane.definition_repository impor
 from mission_control.adapters.postgres.frames.repository import PostgresFrameRepository
 from mission_control.adapters.postgres.frames.transcript_projection import PostgresRunMissionIds
 from mission_control.adapters.postgres.frames.transcript_reads import PostgresMissionEventReader
+from mission_control.adapters.postgres.human_tasks.repository import PostgresHumanTaskRepository
 from mission_control.adapters.postgres.lanes.workspace_leases import PostgresWorkspaceLeaseStore
 from mission_control.adapters.postgres.orchestration.stagegraph_repository import (
     PostgresStageGraphOperationTemplateRepository,
@@ -82,6 +84,7 @@ from mission_control.application.execution.service import (
     RunControlService,
 )
 from mission_control.application.frames.transcript import TranscriptService
+from mission_control.application.human_tasks.service import HumanTaskService
 from mission_control.application.installations.registry import (
     ApplicationBinding,
     ApplicationRegistry,
@@ -291,6 +294,12 @@ async def compose_application_services(
                     request_scope=scope,
                 ),
                 sections=PostgresInspectionSections(runtime_pool),
+            ),
+            # MP-11: an admitted cancel closes the run's open approval tasks.
+            approvals=HumanTaskService(
+                PostgresHumanTaskRepository(runtime_pool),
+                request_scope=scope,
+                approvals=PostgresApprovalTaskRepository(runtime_pool),
             ),
         ),
         runtime=MissionControlRuntimeService(

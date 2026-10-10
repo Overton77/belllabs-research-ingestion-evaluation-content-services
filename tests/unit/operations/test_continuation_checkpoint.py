@@ -375,7 +375,7 @@ def test_request_continuation_delivery_per_lane() -> None:
     assert continuation_delivery("cursor_local") == "wait_then_send"
     assert continuation_delivery("cursor_cloud") == "wait_then_send"
     with pytest.raises(ContinuationUnsupported):
-        continuation_delivery("codex")
+        continuation_delivery("codex_cloud")
 
 
 @pytest.mark.asyncio
@@ -388,7 +388,7 @@ async def test_unsupported_lane_trigger_is_rejected() -> None:
             run_key=RUN_KEY,
             activation_key="unit-collect-1",
             logical_execution_id="logical-collect-1",
-            lane_profile="codex",
+            lane_profile="codex_cloud",
             source_session_ref="thread-collect-1",
         )
     assert raised.value.code == "unsupported_control"

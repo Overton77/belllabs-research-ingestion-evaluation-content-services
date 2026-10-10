@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Self, cast
 
 import pytest
@@ -19,6 +18,7 @@ from biotech_mission_adapters.application.schema.schema_authority_issuance impor
 from biotech_mission_adapters.application.schema.schema_grounding_repository import (
     InMemorySchemaGroundingRecordRepository,
 )
+from biotech_mission_adapters.bootstrap.schema_source import read_authoritative_schema
 from biotech_mission_adapters.domain.schema_catalog.parser import parse_physical_schema
 from biotech_mission_adapters.domain.schema_context.canonicalization import (
     sha256_digest as content_sha256_digest,
@@ -569,8 +569,8 @@ def test_exact_index_descriptors_resolve_aliased_physical_properties() -> None:
 
 
 def test_canonical_schema_exact_comparison_is_compatible_without_stale_artifacts() -> None:
-    schema_path = Path(__file__).resolve().parents[4] / "biotech-kg" / "typedefs.graphql"
-    canonical_sdl = schema_path.read_text(encoding="utf-8")
+    # The Biotech-owned SDL, located and verified against the published reference.
+    canonical_sdl = read_authoritative_schema().decode("utf-8")
     schema_ref = "schema-definition:canonical-alias-regression"
     physical = parse_physical_schema(canonical_sdl.encode(), schema_ref)
     request = _provision_request(

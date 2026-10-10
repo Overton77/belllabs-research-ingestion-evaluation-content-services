@@ -26,6 +26,9 @@ from mission_control.adapters.auth.jwt import (
     MissionAuthenticationRejected,
     MissionTokenVerifier,
 )
+from mission_control.adapters.postgres.approvals.context import PostgresApprovalContextProbe
+from mission_control.adapters.postgres.approvals.intents import PostgresGovernedIntentRepository
+from mission_control.adapters.postgres.approvals.tasks import PostgresApprovalTaskRepository
 from mission_control.adapters.postgres.chains.store import PostgresChainReader
 from mission_control.adapters.postgres.context.continuation_repository import (
     PostgresCheckpointRepository,
@@ -37,6 +40,7 @@ from mission_control.adapters.postgres.frames.transcript_projection import (
 )
 from mission_control.adapters.postgres.frames.transcript_reads import PostgresMissionEventReader
 from mission_control.adapters.postgres.human_tasks.repository import PostgresHumanTaskRepository
+from mission_control.adapters.postgres.run_control.stop_fence import PostgresStopFenceRepository
 from mission_control.adapters.postgres.subscriptions.store import PostgresSubscriptionStore
 from mission_control.adapters.postgres.workspaces.artifact_metadata_repository import (
     PostgresArtifactMetadataRepository,
@@ -53,6 +57,10 @@ from mission_control.adapters.temporal.visibility import TemporalRunVisibility
 from mission_control.application.capabilities.catalog import CatalogService
 from mission_control.application.chains.service import ChainInspectionService
 from mission_control.application.context.continuation import CheckpointReadService
+from mission_control.application.execution.approvals_governed import (
+    GovernedEffectService,
+    GovernedToolRegistry,
+)
 from mission_control.application.execution.harness.registry import describe_only_registry
 from mission_control.application.execution.service import (
     AdmissionPolicyRegistry,
@@ -88,6 +96,8 @@ from mission_control.bootstrap.manifests import (
 )
 from mission_control.bootstrap.settings import get_settings
 from mission_control.bootstrap.subscriptions import (
+    InboxComposition,
+    compose_coordinator_inbox_service,
     compose_subscription_service,
     relay_enabled,
     run_subscription_relays,
@@ -97,6 +107,7 @@ from mission_control.domain.authoring.extensions import ExtensionRegistry
 from mission_control.interfaces.http.catalog import router as catalog_router
 from mission_control.interfaces.http.chains import router as chains_router
 from mission_control.interfaces.http.continuation import router as continuation_router
+from mission_control.interfaces.http.coordinator_inbox import router as coordinator_inbox_router
 from mission_control.interfaces.http.human_tasks import router as human_tasks_router
 from mission_control.interfaces.http.lanes import router as lanes_router
 from mission_control.interfaces.http.middleware.body_limit import BodySizeLimitMiddleware
@@ -164,6 +175,9 @@ class RuntimeOptions:
     # MP-13: the artifact payload store the transcript's `full=true` reads bodies from. The API
     # has no payload store composed by default; unset keeps `501 full_body_unavailable`.
     artifact_payloads: ArtifactPayloadReader | None = None
+    # MP-11: the Mission-Control-owned effect tools the governed gateway may run (trusted
+    # Python composition; none by default, so the gateway governs nothing).
+    governed_tools: GovernedToolRegistry | None = None
 
 
 def install_authentication(application: FastAPI, verifier: MissionTokenVerifier) -> None:
@@ -224,6 +238,17 @@ async def application_pool(secret_ref: str) -> asyncpg.Pool:
         raise RuntimeError("configured PostgreSQL connection is unavailable") from None
 
 
+async def coordinator_inbox_installed(pool: asyncpg.Pool) -> bool:
+    """Whether the application database has the MP-15 inbox tables (release 1.2.0, 0033)."""
+
+    async with pool.acquire() as connection:
+        return bool(
+            await connection.fetchval(
+                "SELECT to_regclass('mission_control.coordinator_inbox') IS NOT NULL"
+            )
+        )
+
+
 async def _stop_relay(stop: asyncio.Event, task: asyncio.Task[None]) -> None:
     stop.set()
     await task
@@ -254,12 +279,16 @@ def create_application(
         catalog_embeddings = configured_catalog_embeddings(get_settings())
         async with AsyncExitStack() as stack:
             subscription_stores: list[PostgresSubscriptionStore] = []
+            inbox_compositions: list[InboxComposition] = []
             try:
                 for item in deployment.applications:
                     config = item.authentication
                     binding = config.binding
                     pool = await application_pool(binding.database_secret_ref)
                     stack.push_async_callback(pool.close)
+                    # MP-15: the coordinator inbox needs release 1.2.0 (migration 0033); an
+                    # application database on an older release keeps every other service.
+                    inbox_installed = await coordinator_inbox_installed(pool)
                     family_pool = None
                     if item.family_writer_secret_ref is not None:
                         family_pool = await application_pool(item.family_writer_secret_ref)
@@ -405,13 +434,51 @@ def create_application(
                         )
                         subscriptions = compose_subscription_service(pool, request_scope(identity))
                         application.state.mission_control_subscription_services[key] = subscriptions
+                        mailbox_semantics = (
+                            services.mailbox.semantics if services.mailbox is not None else None
+                        )
+                        if inbox_installed:
+                            # MP-15 (SPEC-04): the durable coordinator inbox; prompts go through
+                            # this tenant's MissionControlService and its mailbox semantics.
+                            application.state.mission_control_coordinator_inbox_services[key] = (
+                                compose_coordinator_inbox_service(
+                                    pool,
+                                    request_scope(identity),
+                                    commands=services.lifecycle,
+                                    mailbox_semantics=mailbox_semantics,
+                                )
+                            )
+                            inbox_compositions.append(
+                                (
+                                    pool,
+                                    request_scope(identity),
+                                    services.lifecycle,
+                                    mailbox_semantics,
+                                )
+                            )
                         # MP-10 (SPEC-03): Human Gate tasks under the tenant scope; HTTP, MCP
-                        # and the socket resolve through this one service.
+                        # and the socket resolve through this one service. MP-11: approval-
+                        # origin tasks (provider permission/question, MCP elicitation,
+                        # governed effect) share it and its one resolution path; their waiters
+                        # live in the worker's broker, which re-reads the task (no wake here).
+                        approval_tasks = PostgresApprovalTaskRepository(pool)
                         application.state.mission_control_human_task_services[key] = (
                             HumanTaskService(
                                 PostgresHumanTaskRepository(pool),
                                 request_scope=request_scope(identity),
                                 wake=gate_wake,
+                                approvals=approval_tasks,
+                            )
+                        )
+                        # MP-11: prepare/review/execute for Mission-Control-owned tools.
+                        application.state.mission_control_governed_effect_services[key] = (
+                            GovernedEffectService(
+                                PostgresGovernedIntentRepository(pool),
+                                approval_tasks,
+                                options.governed_tools or GovernedToolRegistry(),
+                                request_scope=request_scope(identity),
+                                probe=PostgresApprovalContextProbe(pool),
+                                fences=PostgresStopFenceRepository(pool),
                             )
                         )
                         # MP-14 (SPEC-04): scoped mission/frame streams for the /missions
@@ -460,7 +527,9 @@ def create_application(
                 if subscription_stores and relay_enabled():
                     relay_stop = asyncio.Event()
                     relay_task = asyncio.create_task(
-                        run_subscription_relays(subscription_stores, relay_stop)
+                        run_subscription_relays(
+                            subscription_stores, relay_stop, inboxes=inbox_compositions
+                        )
                     )
                     stack.push_async_callback(_stop_relay, relay_stop, relay_task)
                 application.state.mission_control_ready = True
@@ -483,7 +552,9 @@ def create_application(
     application.state.mission_control_run_list_services = {}
     application.state.mission_control_transcript_search_services = {}
     application.state.mission_control_subscription_services = {}
+    application.state.mission_control_coordinator_inbox_services = {}
     application.state.mission_control_human_task_services = {}
+    application.state.mission_control_governed_effect_services = {}
     application.state.mission_control_stream_services = {}
     application.state.mission_control_chain_services = {}
     application.state.mission_control_manifest_services = {}
@@ -493,6 +564,8 @@ def create_application(
     lane_settings = get_settings()
     application.state.mission_control_lanes = describe_only_registry(
         cursor_bound=lane_settings.cursor_api_key is not None,
+        claude_bound=lane_settings.mission_control_claude_lane,
+        codex_bound=lane_settings.mission_control_codex_lane,
         allow_unqualified=lane_settings.allow_unqualified_lanes,
     )
     install_authentication(application, verifier)
@@ -506,6 +579,7 @@ def create_application(
     application.include_router(chains_router)
     application.include_router(missions_router)
     application.include_router(human_tasks_router)
+    application.include_router(coordinator_inbox_router)
 
     @application.get("/health/live")
     def live() -> dict[str, bool]:

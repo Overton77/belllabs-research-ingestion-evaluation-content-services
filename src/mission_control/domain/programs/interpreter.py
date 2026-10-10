@@ -801,6 +801,101 @@ class StageGraphInterpreter:
             valid_output_refs=outputs,
         )
 
+    def failure_completion(
+        self,
+        projection: StageGraphAcceptedProjection,
+    ) -> StageGraphCompletionProposal | None:
+        """MP-20: the graph concluded without acceptance, or ``None`` (a stalemate).
+
+        01-STAGE_GRAPH §6-7: a failed required stage does not by itself fail the graph;
+        dependent stages become skipped only when their release is conclusively impossible,
+        and the graph's execution completes when every reachable required stage is terminal.
+        This is that conclusion when a stage failed (a denied Human Gate is a failed gate
+        stage: SPEC-03 "Reject closes the gate as not accepted"): nothing is admitted or
+        running, no producer liability is open, every stage still waiting for release has a
+        join that can no longer be satisfied (directly, or because its producer is itself
+        unreleasable), and no dependency between reachable stages is unresolved. Anything
+        else (a dependency that may still resolve, an optional input from an unreleasable
+        producer, no failed stage at all) is not concluded: the caller keeps the stalemate.
+        """
+
+        stages = projection.stages.values()
+        if any(item.status in {"reserved", "running", "waiting", "paused"} for item in stages):
+            return None
+        if not any(item.status == "failed" for item in stages):
+            return None
+        waiting = [item for item in stages if item.status in {"blocked", "ready"}]
+        skipped: set[str] = set()
+        changed = True
+        while changed:
+            changed = False
+            for instance in waiting:
+                stage_id = instance.candidate.stage_id
+                if stage_id in skipped:
+                    continue
+                if any(
+                    self._conclusively_impossible(join, projection, skipped)
+                    for join in self.stage_joins[stage_id]
+                ):
+                    skipped.add(stage_id)
+                    changed = True
+        if any(item.candidate.stage_id not in skipped for item in waiting):
+            return None
+        pending = [
+            dependency_id
+            for dependency_id, item in projection.dependencies.items()
+            if item.disposition == DependencyDisposition.UNRESOLVED
+            and self.dependencies[dependency_id].dependency_class != DependencyClass.ADVISORY
+            and self.dependencies[dependency_id].producer_stage_id not in skipped
+            and self.dependencies[dependency_id].consumer_stage_id not in skipped
+        ]
+        completion = self.completion(projection)
+        if pending or completion.open_producer_liability_ids:
+            return None
+        return replace(
+            completion,
+            pending_dependency_ids=(),
+            failed=True,
+            skipped_stage_ids=tuple(sorted(skipped, key=lambda item: item.encode("utf-8"))),
+        )
+
+    def _conclusively_impossible(
+        self,
+        join: StageJoin,
+        projection: StageGraphAcceptedProjection,
+        skipped: set[str],
+    ) -> bool:
+        """A join that can never be satisfied, counting a dependency whose producer stage is
+        skipped as never resolving. An optional dependency of a skipped producer would be
+        omitted (and so satisfy its join), which this conclusion does not record: such a join
+        is never treated as impossible."""
+
+        satisfied = 0
+        unresolved = 0
+        non_advisory = [
+            self.dependencies[item]
+            for item in join.dependency_ids
+            if self.dependencies[item].dependency_class != DependencyClass.ADVISORY
+        ]
+        for edge in non_advisory:
+            disposition = projection.dependencies[edge.dependency_id].disposition
+            if disposition == DependencyDisposition.UNRESOLVED:
+                if edge.producer_stage_id not in skipped:
+                    unresolved += 1
+                elif edge.dependency_class == DependencyClass.OPTIONAL:
+                    return False
+            elif self.dependency_satisfies(edge.dependency_class, disposition):
+                satisfied += 1
+        count = len(non_advisory)
+        if join.kind == JoinKind.ALL:
+            return satisfied + unresolved < count
+        if join.kind == JoinKind.ANY:
+            return satisfied == 0 and unresolved == 0
+        minimum = join.minimum
+        if minimum is None:
+            raise StageGraphExecutionError("minimum join is missing its frozen threshold")
+        return satisfied < minimum and satisfied + unresolved < minimum
+
     def _select_next_candidate(
         self,
         candidates_by_group: dict[str, list[tuple[CandidateOrderingKey, StageInstanceProjection]]],

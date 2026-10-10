@@ -33,7 +33,7 @@ from enum import StrEnum
 from typing import Literal, Protocol
 from uuid import UUID, uuid5
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
 from mission_control.application.context.pack_service import (
     ContextPackRejected,
@@ -72,6 +72,13 @@ from mission_control.domain.context.checkpoint import (
     validate_checkpoint,
 )
 from mission_control.domain.context.packet import ContextPacket, LaneFileSupport, ModelBudgetProfile
+from mission_control.domain.context.phases import (
+    ContinuationPhase,
+    PhaseEntry,
+    fences_source,
+    phase_entries_consistent,
+    phase_reached,
+)
 from mission_control.domain.frames.contracts import FrameKind, ProviderFrame
 from mission_control.domain.policies.contracts import (
     ActorContext,
@@ -140,6 +147,73 @@ class ContinuationTransfer(_Record):
     version: int = Field(default=1, ge=1)
     requested_at: AwareDatetime
     updated_at: AwareDatetime
+    # MP-12 (SPEC-01, ADR-0039): the persisted phase machine. Every field below is additive
+    # and lives in the row's `transfer` jsonb (no migration); a row written before MP-12
+    # carries none of them and its phase is lifted from its status (`_lift_legacy_phase`).
+    phase: ContinuationPhase = ContinuationPhase.REQUESTED
+    phases: tuple[PhaseEntry, ...] = ()
+    harness_execution_id: str | None = Field(default=None, min_length=1, max_length=128)
+    source_generation: int = Field(default=1, ge=1)
+    target_generation: int | None = Field(default=None, ge=2)
+    target_turn_no: int | None = Field(default=None, ge=1)
+    """The turn number the activated target's first turn carries (the continuation turn)."""
+    workspace_snapshot_ref: str | None = Field(default=None, min_length=1, max_length=2_048)
+    workspace_manifest_digest: str | None = None
+    packet_digest: str | None = None
+    materialization_digest: str | None = None
+    """Digest of exactly what the target receives: packet digest, workspace manifest digest
+    and the rendered ``.mission/`` files; recomputed and compared before activation."""
+    restored_manifest_digest: str | None = None
+    activated_at: AwareDatetime | None = None
+
+    @model_validator(mode="after")
+    def _lift_legacy_phase(self) -> ContinuationTransfer:
+        if not phase_entries_consistent(self.phases):
+            raise ValueError("continuation phase entries are out of order")
+        if self.phases:
+            return self
+        implied = _LEGACY_PHASE.get(self.status)
+        if self.status == TransferStatus.TRANSFERRED and self.released:
+            implied = ContinuationPhase.ACTIVATED
+        if implied is not None and not phase_reached(self.phase, implied):
+            object.__setattr__(self, "phase", implied)
+        return self
+
+    @property
+    def activated(self) -> bool:
+        return self.phase == ContinuationPhase.ACTIVATED
+
+    @property
+    def ended(self) -> bool:
+        """No further phase will be entered: activated, failed, exhausted or parked for a
+        human (a human-review resolution path is not wired by MP-12; the source is released
+        so the unit can settle rather than wait forever)."""
+
+        return self.activated or self.status in _ENDED_STATUSES
+
+    @property
+    def fencing(self) -> bool:
+        """The source generation takes no new agent action while this is true."""
+
+        return fences_source(self.phase, terminal=self.ended)
+
+    @property
+    def open(self) -> bool:
+        """Requested or in flight: neither activated nor ended."""
+
+        return not self.ended
+
+
+_ENDED_STATUSES = frozenset(
+    {TransferStatus.FAILED, TransferStatus.GOVERNOR_EXHAUSTED, TransferStatus.HUMAN_REVIEW}
+)
+
+
+# A pre-MP-12 row records only its status; the phase it reached follows from it.
+_LEGACY_PHASE: dict[TransferStatus, ContinuationPhase] = {
+    TransferStatus.SEALED: ContinuationPhase.SEALED,
+    TransferStatus.TRANSFERRED: ContinuationPhase.VERIFIED,
+}
 
 
 def transfer_id_for(
@@ -482,9 +556,20 @@ class ContinuationService:
     # -- seal -----------------------------------------------------------------------------
 
     async def seal(
-        self, transfer_id: str, facts: ContinuationFacts, target: SealTarget, *, request_scope: str
+        self,
+        transfer_id: str,
+        facts: ContinuationFacts,
+        target: SealTarget,
+        *,
+        request_scope: str,
+        snapshot: WorkspaceSnapshot | None = None,
+        held: Sequence[str] | None = None,
     ) -> SealOutcome:
-        """08 section 9 up to the seal, with 08 section 8 failure and 13 governors."""
+        """08 section 9 up to the seal, with 08 section 8 failure and 13 governors.
+
+        MP-12: the phase machine freezes (``held``) and snapshots (``snapshot``) in their own
+        persisted phases before sealing; when it passes them, nothing is held or frozen again.
+        """
 
         transfer = await self._require(request_scope, transfer_id)
         if transfer.status == TransferStatus.SEALED or transfer.status in (
@@ -495,20 +580,30 @@ class ContinuationService:
                 if transfer.checkpoint_id
                 else None
             )
-            return SealOutcome(transfer=transfer, checkpoint=stored.checkpoint if stored else None)
+            packet = None
+            if stored is not None and stored.checkpoint.valid:
+                packet_id = stored.checkpoint.context_packet_ref.removeprefix(
+                    "context_packet:"
+                ).rsplit("#", 1)[0]
+                packet = await self._packet_reader.get(packet_id, request_scope=request_scope)
+            return SealOutcome(
+                transfer=transfer, checkpoint=stored.checkpoint if stored else None, packet=packet
+            )
         verdict = evaluate_governors(transfer.ledger, self._governors)
         if not verdict.allowed:
             return SealOutcome(
                 transfer=await self._exhausted(transfer, ",".join(verdict.exhausted))
             )
         # Freeze new agent actions: hold every pending mailbox command for this transfer.
-        held = await self._mailbox.hold(request_scope, transfer.run_key, transfer.transfer_id)
-        snapshot = await self._snapshots.snapshot(
-            request_scope=request_scope,
-            run_key=transfer.run_key,
-            session_ref=transfer.source_session_ref,
-            roots=("/inputs", "/outputs", "/.mission"),
-        )
+        if held is None:
+            held = await self._mailbox.hold(request_scope, transfer.run_key, transfer.transfer_id)
+        if snapshot is None:
+            snapshot = await self._snapshots.snapshot(
+                request_scope=request_scope,
+                run_key=transfer.run_key,
+                session_ref=transfer.source_session_ref,
+                roots=("/inputs", "/outputs", "/.mission"),
+            )
         facts = facts.model_copy(
             update={
                 "queued_command_ids": tuple(dict.fromkeys((*facts.queued_command_ids, *held))),
@@ -753,6 +848,63 @@ class ContinuationService:
             request_scope, transfer.run_key, transfer.transfer_id, transfer.held_command_ids
         )
         return await self._save(transfer, released=True)
+
+    # -- MP-12: what the phase machine composes over --------------------------------------
+
+    @property
+    def transfer_store(self) -> ContinuationTransferRepository:
+        return self._transfers
+
+    @property
+    def checkpoint_store(self) -> CheckpointRepository:
+        return self._checkpoints
+
+    @property
+    def packet_reader(self) -> PacketReader:
+        return self._packet_reader
+
+    @property
+    def snapshot_port(self) -> WorkspaceSnapshotPort:
+        return self._snapshots
+
+    @property
+    def mailbox(self) -> MailboxHoldPort:
+        return self._mailbox
+
+    @property
+    def governor_policy(self) -> ContinuationGovernorPolicy:
+        return self._governors
+
+    def now(self) -> datetime:
+        return self._clock()
+
+    async def require(self, request_scope: str, transfer_id: str) -> ContinuationTransfer:
+        return await self._require(request_scope, transfer_id)
+
+    async def save(self, transfer: ContinuationTransfer, **changes: object) -> ContinuationTransfer:
+        """Compare-and-set one change set on the transfer row (version + 1)."""
+
+        return await self._save(transfer, **changes)
+
+    async def fail(self, transfer: ContinuationTransfer, reason: str) -> ContinuationTransfer:
+        return await self._fail(transfer, reason)
+
+    async def record_transferred(
+        self, transfer: ContinuationTransfer, checkpoint: ContinuationCheckpoint
+    ) -> None:
+        await self._events.record(
+            transfer.request_scope,
+            transfer.run_key,
+            self._action(transfer, "transferred", checkpoint=checkpoint),
+        )
+
+    async def previous_checkpoint(self, transfer: ContinuationTransfer) -> CheckpointBody | None:
+        return await self._previous_checkpoint(transfer)
+
+    async def snapshot_of(
+        self, checkpoint: ContinuationCheckpoint, transfer: ContinuationTransfer
+    ) -> WorkspaceSnapshot:
+        return await self._snapshot_of(checkpoint, transfer)
 
     # -- reads -----------------------------------------------------------------------------
 

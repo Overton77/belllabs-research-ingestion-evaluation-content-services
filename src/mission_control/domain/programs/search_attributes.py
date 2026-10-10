@@ -18,7 +18,16 @@ SearchAttributePolicy = Literal["required", "disabled"]
 WorkflowKind = Literal["root", "family", "operation"]
 SearchAttributeFamily = Literal["stage_graph", "goal_directed"]
 SearchAttributeKind = Literal["keyword", "int", "keyword_list"]
-MissionLane = Literal["deep_agents", "cursor_local", "cursor_cloud"]
+# `mc_lane` values: the seven Lane Profiles (`domain/execution/lanes.LANE_PROFILES`, ADR-0035).
+MissionLane = Literal[
+    "deep_agents",
+    "cursor_local",
+    "cursor_cloud",
+    "claude_agent_sdk",
+    "codex",
+    "claude_cloud",
+    "codex_cloud",
+]
 MissionPhase = Literal["executing", "cancelling", "in_doubt", "completed", "cancelled", "failed"]
 
 SEARCH_ATTRIBUTES_REQUIRED: Final = "required"
@@ -43,7 +52,15 @@ MC_LANE: Final = "mc_lane"
 MC_PHASE: Final = "mc_phase"
 FORKED_FROM_RUN_ID: Final = "ForkedFromRunId"
 
-MC_LANES: Final[tuple[MissionLane, ...]] = ("deep_agents", "cursor_local", "cursor_cloud")
+MC_LANES: Final[tuple[MissionLane, ...]] = (
+    "deep_agents",
+    "cursor_local",
+    "cursor_cloud",
+    "claude_agent_sdk",
+    "codex",
+    "claude_cloud",
+    "codex_cloud",
+)
 MC_PHASES: Final[tuple[MissionPhase, ...]] = (
     "executing",
     "cancelling",

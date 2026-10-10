@@ -9,6 +9,8 @@ description = "Governed mission execution with Temporal and bounded agent cognit
 requires-python = ">=3.12"
 dependencies = [
   "aioboto3>=15,<16",
+  # The MP-07 Claude lane's explicit-environment CLI transport spawns through anyio, as the SDK does.
+  "anyio>=4,<5",
   "asyncpg>=0.30,<1",
   "claude-agent-sdk==0.2.165",
   "cursor-sdk==1.0.37",
@@ -304,8 +306,6 @@ langgraph-checkpoint-postgres = "langgraph"
 # Loaded by configuration/CLI rather than imported: provider routes, Agent Server runtime,
 # `langgraph dev`, the ASGI server, and the OpenTelemetry pins behind temporalio[opentelemetry].
 DEP002 = [
-  # Pinned for the partial MP-07 lane; remove this exception when its SDK harness lands.
-  "claude-agent-sdk",
   "langchain-anthropic",
   "langchain-quickjs",
   "langgraph-api",

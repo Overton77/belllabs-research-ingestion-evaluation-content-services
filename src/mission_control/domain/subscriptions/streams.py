@@ -9,6 +9,13 @@ the authenticated scope, never a client-selectable namespace or room name; curso
 monotone and bounded by server-sent high-watermarks.
 
 The error vocabulary is UPPER_SNAKE like the existing public codes (`STALE_GENERATION`).
+
+Additive, backward-compatible extension (multi-provider SPEC-04 follow-up, still v1): a
+cursor domain is keyed by `(stream, cursor_key)`, where the key is the execution of a
+provider-frame cursor (`<harness_execution_id>:<ordinal>`, as always) or the mission of a
+keyed mission-event cursor (`<mission_id>:<seq>`, used by `chain` targets whose members have
+separate journals). A request may therefore carry one cursor per execution or per member
+mission; a request with at most one cursor per stream validates and behaves exactly as before.
 """
 
 from __future__ import annotations
@@ -24,6 +31,7 @@ StreamName = Literal["mission_events", "provider_frames", "presence"]
 STREAMS: Final[tuple[StreamName, ...]] = ("mission_events", "provider_frames", "presence")
 TargetKind = Literal["mission", "run", "execution", "chain"]
 Visibility = Literal["full", "lifecycle_only", "unavailable"]
+MAX_STREAM_CURSORS: Final = 64
 SubordinateKind = Literal["provider_subagent", "agent_server_child", "linked_mission"]
 
 STREAM_ERROR_CODES: Final[tuple[str, ...]] = (
@@ -80,6 +88,14 @@ class StreamCursor(StreamContract):
     position: str = Field(min_length=1, max_length=512)
     generation: int | None = Field(default=None, ge=1)
 
+    @property
+    def key(self) -> str:
+        """The cursor's domain key within its stream: the execution of a provider-frame
+        cursor, the mission of a keyed mission-event cursor, '' for a plain sequence."""
+
+        head, separator, _tail = self.position.rpartition(":")
+        return head if separator else ""
+
 
 class StreamFilters(StreamContract):
     kinds: tuple[str, ...] = ()
@@ -113,9 +129,12 @@ class StreamSubscription(StreamContract):
     def coherent(self) -> StreamSubscription:
         if len(set(self.streams)) != len(self.streams):
             raise ValueError("streams must be unique")
+        if len(self.cursors) > MAX_STREAM_CURSORS:
+            raise ValueError(f"at most {MAX_STREAM_CURSORS} cursors")
+        domains = [(cursor.stream, cursor.key) for cursor in self.cursors]
+        if len(set(domains)) != len(domains):
+            raise ValueError("at most one cursor per stream and execution or mission")
         cursor_streams = [cursor.stream for cursor in self.cursors]
-        if len(set(cursor_streams)) != len(cursor_streams):
-            raise ValueError("at most one cursor per stream")
         unknown = sorted(set(cursor_streams) - set(self.streams))
         if unknown:
             raise ValueError(f"cursors name streams not subscribed: {unknown}")
@@ -200,6 +219,7 @@ def stream_contract_schemas() -> dict[str, dict[str, Any]]:
 
 
 __all__ = [
+    "MAX_STREAM_CURSORS",
     "STREAMS",
     "STREAM_ENVELOPE_SCHEMA",
     "STREAM_ERROR_CODES",

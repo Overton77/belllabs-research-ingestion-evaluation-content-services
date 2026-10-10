@@ -1,7 +1,7 @@
 ---
 type: Concept
 title: Coordinator authoring and launch
-description: How a coordinator or a human takes a mission from description to an explicit start - the coordinator MCP launch path and the Mission Manifest v1 compile, submit and start path - and which steps run today; mission start now has a production launch input author (MP-02) but answers start_unavailable until the operator's launch bindings file binds every node.
+description: How a coordinator or a human takes a mission from description to an explicit start - the coordinator MCP launch path and the Mission Manifest v1 compile, submit and start path - and which steps run today; mission start has a production launch input author (MP-02, mission/v1 and v2, sealed provider and Cursor bindings) but answers start_unavailable until the operator's launch bindings file binds every node.
 tags: [mission-control, authoring, coordinator, mcp, implementation]
 ---
 
@@ -102,10 +102,15 @@ deterministically into a typed `MissionDefinition@1`, a Compiled Program and a V
 
 **Mission start needs the operator's bindings (B1).** Since MP-02 the API composes
 `ManifestLaunchInputAuthor` from `MANIFEST_LAUNCH_BINDINGS_PATH` (`bootstrap/manifests.py`), and the
-worker's chain relay uses the same author. Without that file, or for any node it does not bind
-(every non-`deep_agents` lane among them), `start` answers `409 start_unavailable` with the
-manifest pointer. No production bindings file exists; its model, sandbox and secret-ref choices
-are owner decisions ([mission manifest](mission-manifest.md),
+worker's chain relay uses the same author. Since the 2026-10-09 recovery it also accepts mission/v2
+and `mc.manifest_launch_bindings.v2`, sealing a `ProviderExecutionBinding` for Claude and Codex
+nodes from the file's `providers` section (`application/authoring/provider_launch.py`) and a
+`mc.cursor_binding.v1` for Cursor nodes (`cursor_launch.py`); it lowers manifest Human Gates
+([Human Gates](human-gates.md)). For any node the file does not bind, or a hook script, plugin or
+executor the Cursor binding has no slot for, `start` answers `409 start_unavailable` with the
+manifest pointer; hosted profiles compile with a warning and never launch. No production bindings
+file exists; its model, auth, sandbox and secret-ref choices are owner decisions
+([mission manifest](mission-manifest.md),
 [owner runbook](../specs/fast-track-2026-10/OWNER-FIXTURE-RUNBOOK.md)).
 
 ## Specified only
@@ -137,5 +142,7 @@ with resource-bound OAuth (ADR-0015) lives in `coordinator_auth.py`, outside thi
   [facade tests](../../tests/unit/coordinator/test_coordinator_facade.py),
   [MCP surface tests](../../tests/unit/coordinator/test_coordinator_mcp_read_surface.py),
   [control-plane tests](../../tests/unit/control_plane/test_control_plane.py).
-- Manifest: [mission manifest](mission-manifest.md).
+- Manifest: [mission manifest](mission-manifest.md);
+  [provider launch](../../src/mission_control/application/authoring/provider_launch.py),
+  [Cursor launch](../../src/mission_control/application/authoring/cursor_launch.py).
 - [`0016_coordinator_support.sql`](../../packages/mission-control-db-contract/component/migrations/0016_coordinator_support.sql).

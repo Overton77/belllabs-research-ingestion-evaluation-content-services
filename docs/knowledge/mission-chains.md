@@ -1,7 +1,7 @@
 ---
 type: Concept
 title: Mission chains
-description: How a manifest with missions and links compiles into independent missions joined by typed links, how the chain reducer releases the next mission through the outbox in the same transaction as the event that satisfies the link, what state transfers, and the unbuilt launch step that blocks Mission 2.
+description: How a manifest with missions and links compiles into independent missions joined by typed links, how the chain reducer releases the next mission through the outbox in the same transaction as the event that satisfies the link, what state transfers, the production relay and cross-provider chain evidence, and what still keeps Mission 2 from starting as authored.
 tags: [mission-control, chains, mission-chain, outbox, reducer, implementation]
 ---
 
@@ -87,10 +87,15 @@ consumer through a `ChainLaunchInputPort`. Since MP-02 the worker runs `ChainRel
 `MANIFEST_LAUNCH_BINDINGS_PATH` it refuses startup. A redelivered `mc.chain.start_run` attaches to
 the consumer's existing workflow (`tests/integration/temporal/test_manifest_launch_production.py`,
 deterministic cognition). Every launch binds the run to its Temporal cluster
-([operations](operations.md)). Members on a non-`deep_agents` lane still fail at their pointer,
-so Mission 2 of the fixtures (a Cursor Cloud research Goal Loop supplying a Deep Agents
-ingestion Goal Loop) compiles and submits but cannot start until the bindings and the Cursor
-lane allow it ([mission manifest](mission-manifest.md)).
+([operations](operations.md)). Members on Claude, Codex or Cursor lanes start through the same
+author once the bindings file binds them; a linked child family that concluded failed is recorded
+`failed` (patch `mp20-linked-child-concluded-failed`). MP-20 proves two linked Goal Loops across
+providers with a replayed release that starts the consumer once, on real PostgreSQL and Temporal
+with FIXTURE providers. Mission 2 of the fixtures (a Cursor Cloud research Goal Loop supplying a
+Deep Agents ingestion Goal Loop) no longer fails at the consumer's review: its undeclared Goal Loop
+reviewer is the `owner` role ([Human Gates](human-gates.md)). As authored it still cannot start:
+its research member's hook script has no slot in `mc.cursor_binding.v1`
+([mission manifest](mission-manifest.md)).
 
 # Citations
 
@@ -114,4 +119,6 @@ lane allow it ([mission manifest](mission-manifest.md)).
   [tables](../../tests/integration/postgres/test_mission_chain_tables.py),
   [release](../../tests/integration/postgres/test_chain_release.py),
   [idempotent start](../../tests/integration/temporal/test_chain_start_idempotent.py),
-  [two linked Goal Loops](../../tests/acceptance/mission_control/test_chain_two_goal_loops.py).
+  [two linked Goal Loops](../../tests/acceptance/mission_control/test_chain_two_goal_loops.py),
+  [MP-20 cross-provider chains](../../tests/integration/temporal/test_mp20_workflow_parity.py),
+  [linked child concluded failed](../../tests/unit/orchestration/test_linked_child_concluded_failed.py).

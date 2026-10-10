@@ -1,7 +1,7 @@
 ---
 type: Concept
 title: Human Gates and the Human Task Service
-description: How a Human Gate runs today as the mc.human_gate.v1 control activation over the common human_task rows, the one HumanTaskService that HTTP, MCP and the socket resolve through, the StageGraph gate stage and GoalDirected review behind the mp10 patches, and what the production launch path does not yet lower.
+description: How a Human Gate runs as the mc.human_gate.v1 control activation over the common human_task rows, how the production launch lowers manifest gates (default owner reviewer for a Goal Loop review), how a denial fails the run, how native provider approvals and governed effects (MP-11) open approval tasks on the same HumanTaskService through the durable approval broker, and the transports that resolve them.
 tags: [mission-control, durable-controls, human-task, human-gate, implementation]
 ---
 
@@ -11,7 +11,8 @@ A [Human Gate](../../GLOSSARY.md) opens one [Human Task](../../GLOSSARY.md) per 
 review round and waits on its attributed resolution; timeout is never approval (SPEC-03
 "Explicit Human Gate", [ADR-0038](../adr/0038-two-origins-of-human-control-over-one-human-task-service.md),
 `proposed`). The specified control vocabulary is in [durable controls](durable-controls.md).
-Built by MP-10 and integrated 2026-10-09; native provider approvals (MP-11) are not integrated.
+Built by MP-10; native provider approvals and governed effects (MP-11) use the same service. Both
+were integrated and composed in the 2026-10-09 recovery session; nothing here is live-proven.
 
 ## Rules (domain)
 
@@ -39,8 +40,7 @@ refuses an outcome naming another task, round or packet digest.
 `human_resolution` rows and appends `human_task.created`, `human_task.resolved`,
 `human_task.expired`, `human_task.cancelled` or `human_task.escalated` with its outbox row in the
 same transaction (`canonical.append_events`). The alias projection publishes
-`human_task.created` as `human_task.opened` ([events and commands](events-and-commands.md)). No
-migration was added.
+`human_task.created` as `human_task.opened` ([events and commands](events-and-commands.md)).
 
 ## The control activation
 
@@ -57,7 +57,11 @@ in `adapters/temporal/deployment_composition.py`.
   in `StageGraphRunInput.human_gates` starts the activation as a child instead of an operation,
   releases its admitted reservation against zero usage (`human_gate.settle_stage_reservation`),
   and reports the outcome as the stage result; `request_changes` runs the declared remediation
-  cycle before any consumer of the gate is admitted.
+  cycle before any consumer of the gate is admitted. A denied gate now fails the run: the
+  interpreter's `failure_completion` proposes a failed completion with the failed and skipped
+  stages (patch `mp20-stagegraph-concluded-failure`), and a linked child that concluded failed is
+  recorded `failed` (`mp20-linked-child-concluded-failed`). A gate stage's same-id legacy wait is
+  pre-satisfied at launch (`satisfied_wait_ids`); it had held the gate stage forever.
 - **GoalDirected** (`workflows/goal_directed.py`, patch `mp10-goal-human-review`): with
   `GoalDirectedRunInput.human_review`, a verified completion proposal opens one review on the
   verified outputs and the verifier decision (`domain/programs/human_review.py`);
@@ -78,20 +82,48 @@ signal only delays until the next poll. The API composes one service per tenant 
 - Socket event `resolve_human_task` on `/missions` (`interfaces/socketio/commands.py`): the HTTP
   body plus `application_id` and `human_task_id`; `UNSUPPORTED_OPERATION` when not composed
   ([mission stream](mission-stream.md)).
-- MCP tools `mission_human_task_list|get|resolve` (`interfaces/mcp/human_task_tools.py`).
+- HTTP `POST /human-tasks/{id}/approval-resolutions` for approval tasks (`reviewed_digest`,
+  edited arguments, answers, elicitation content, `cancel`); the socket forwards the same body.
+- MCP tools `mission_human_task_list|get|resolve` (`interfaces/mcp/human_task_tools.py`) and the
+  governed tools `mission_governed_prepare|execute|status`, `mission_approval_resolve`
+  (`interfaces/mcp/governed_gateway.py`).
+
+## Production lowering
+
+`ManifestLaunchInputAuthor.family_input` (`application/authoring/manifest_launch_inputs.py`) lowers a
+committed definition's `human_gate` nodes into `StageGraphRunInput.human_gates`
+(`stagegraph_human_gates`) and a Goal Loop whose acceptance requires `human` into
+`GoalDirectedRunInput.human_review` (`goal_human_review`). mission/v1 cannot place a `human_gate`
+under a Goal Loop root, so an undeclared Goal Loop reviewer is the existing `owner` reviewer role
+(`DEFAULT_GOAL_REVIEWERS`, `application/programs/human_gates.py`): only principal `owner` or a
+verified `reviewer:owner` grant satisfies it; declared gate reviewers win. The review is kept, never
+skipped (this unblocked Mission 2's chain consumer).
+
+## Approval-origin tasks (MP-11)
+
+A native provider request (Claude `can_use_tool`, Codex approval, user-input and elicitation RPCs)
+or a governed effect opens a Human Task of kind `approval:<origin>` on the same rows and service
+(`application/execution/approvals.py`). `ApprovalBroker` (`approvals_broker.py`) binds the
+`mc.approval_binding.v1` task and a fresh live `approval_correlation` row **before** anyone waits,
+waits bounded (`MISSION_CONTROL_APPROVAL_WAIT_S`, at most 600 s; expiry denies and interrupts the
+native request while the task stays open), revalidates generation, policy digest, grants and the
+Stop Fence before a decision reaches the provider, and on restart `recover` marks the dead
+connection's correlations `lost`. Reviewers default to `owner`
+(`MISSION_CONTROL_APPROVAL_REVIEWERS`). `GovernedEffectService` (`approvals_governed.py`) is the
+prepare, review, execute protocol for Mission-Control-owned effect tools: a persisted
+`governed_effect_intent` with its input digest, one approval task, execution claimed once by
+compare-and-set and admitted through the Stop Fence; changed arguments are a new intent.
+`approvals_coverage.py` rejects an approval mode a lane cannot enforce at admission. Both tables
+ship in migration 0033 (release 1.2.0); the PostgreSQL adapters are in `adapters/postgres/approvals/`.
+An accepted cancel closes the run's open approval tasks (`MissionControlService(approvals=)`).
 
 ## Gaps, reported not resolved
 
-- The production launch does not lower manifest gates: `prepare_bound` in
-  `application/programs/service.py` passes neither `human_gates` nor `human_review`, and
-  `stagegraph_human_gates` / `goal_human_review` (`application/programs/human_gates.py`) have no
-  production caller. Only tests set them, so a submitted manifest with a `human_gate` node does
-  not open a task in the configured deployment.
-- `register_human_task_tools` is defined but no served MCP server calls it; the tools are proven
-  only in `tests/unit/human_tasks/test_human_task_interfaces.py`.
 - The manifest `HumanTaskSpec` cannot express a remediation target or a default answer, so
   `gate_spec_from_manifest` refuses `default_answer` and lowered gates admit only
-  `approve | deny`.
+  `approve | deny`; `request_changes` on a manifest Stage Graph gate is a typed refusal (MP-20 V09).
+- The technical coordinator mount has no tenant-scoped Human Task or governed services; the
+  development MCP server (`python -m mission_control.interfaces.mcp`) serves them.
 - No `missionctl human-task` group; the spec lifecycle value `claimed` is not used.
 
 # Citations
@@ -107,9 +139,22 @@ signal only delays until the next poll. The API composes one service per tenant 
   [control activation](../../src/mission_control/adapters/temporal/workflows/human_gate.py),
   [HTTP](../../src/mission_control/interfaces/http/human_tasks.py),
   [MCP tools](../../src/mission_control/interfaces/mcp/human_task_tools.py),
-  [socket forwarding](../../src/mission_control/interfaces/socketio/commands.py).
+  [socket forwarding](../../src/mission_control/interfaces/socketio/commands.py),
+  [launch lowering](../../src/mission_control/application/authoring/manifest_launch_inputs.py),
+  [approval contracts](../../src/mission_control/application/execution/approvals.py),
+  [approval broker](../../src/mission_control/application/execution/approvals_broker.py),
+  [governed effects](../../src/mission_control/application/execution/approvals_governed.py),
+  [approval coverage](../../src/mission_control/application/execution/approvals_coverage.py),
+  [approval tasks in PostgreSQL](../../src/mission_control/adapters/postgres/approvals/tasks.py),
+  [governed MCP tools](../../src/mission_control/interfaces/mcp/governed_gateway.py).
 - Tests: [gate rules](../../tests/unit/human_tasks/test_human_gate_rules.py),
   [interfaces](../../tests/unit/human_tasks/test_human_task_interfaces.py),
   [manifest lowering](../../tests/unit/human_tasks/test_manifest_gate_lowering.py),
   [tasks in PostgreSQL](../../tests/integration/postgres/test_human_gate_tasks_postgres.py),
-  [restart, deadlines and lost wakes on Temporal](../../tests/integration/temporal/test_mp10_human_gate_restart.py).
+  [restart, deadlines and lost wakes on Temporal](../../tests/integration/temporal/test_mp10_human_gate_restart.py),
+  [Goal review](../../tests/unit/human_tasks/test_goal_review.py),
+  [denied gate fails the run](../../tests/unit/orchestration/test_mp20_stagegraph_concluded_failure.py),
+  [approval broker](../../tests/unit/approvals/test_approval_broker.py),
+  [governed gateway](../../tests/unit/approvals/test_governed_gateway.py),
+  [approvals in PostgreSQL](../../tests/integration/postgres/test_mp11_approvals_postgres.py),
+  [governed effects in PostgreSQL](../../tests/integration/postgres/test_mp11_governed_postgres.py).

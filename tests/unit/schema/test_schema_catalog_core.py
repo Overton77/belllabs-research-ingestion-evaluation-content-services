@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import json
 from hashlib import sha256
-from pathlib import Path
 
 import pytest
 
 from biotech_mission_adapters.application.schema.schema_catalog import (
     DEFAULT_SEMANTIC_OVERLAY,
     parse_schema_catalog,
+)
+from biotech_mission_adapters.bootstrap.schema_source import (
+    locate_authoritative_schema,
+    read_authoritative_schema,
 )
 from biotech_mission_adapters.domain.schema_catalog import (
     CatalogValidationError,
@@ -111,11 +114,10 @@ def test_overlay_drift_fails_closed() -> None:
 
 
 def test_governed_trudiagnostic_overlay_validates_against_authoritative_sdl() -> None:
-    project_root = Path(__file__).resolve().parents[3]
-    authoritative_sdl = (
-        project_root.parent / "biotech-kg" / "src" / "schema" / "neo4jbiotechschema.graphql"
+    authoritative_sdl = locate_authoritative_schema()
+    physical = parse_physical_schema(
+        read_authoritative_schema(authoritative_sdl), str(authoritative_sdl)
     )
-    physical = parse_physical_schema(authoritative_sdl.read_bytes(), str(authoritative_sdl))
     overlay = load_semantic_overlay(DEFAULT_SEMANTIC_OVERLAY)
 
     require_valid_catalog_overlay(physical, overlay)
@@ -126,8 +128,8 @@ def test_governed_trudiagnostic_overlay_validates_against_authoritative_sdl() ->
 
 
 def test_published_schema_reference_matches_authoritative_source() -> None:
-    project_root = Path(__file__).resolve().parents[3]
-    authoritative_sdl = project_root.parent / "biotech-kg/src/schema/neo4jbiotechschema.graphql"
+    # Raw bytes from the located Biotech-owned file, compared independently of the resolver.
+    authoritative_sdl = locate_authoritative_schema()
     reference = json.loads(
         (DEFAULT_SEMANTIC_OVERLAY.parent / "source-reference.v1.json").read_text(encoding="utf-8")
     )
@@ -150,12 +152,9 @@ def test_legacy_workflow_catalog_digest_is_portable_and_receives_semantics() -> 
     plain_second = parse_schema_catalog(SDL, "/other/schema.graphql")
     assert plain_first.catalog_digest == plain_second.catalog_digest
 
-    project_root = Path(__file__).resolve().parents[3]
-    authoritative_sdl = (
-        project_root.parent / "biotech-kg" / "src" / "schema" / "neo4jbiotechschema.graphql"
-    )
+    authoritative_sdl = locate_authoritative_schema()
     catalog = parse_schema_catalog(
-        authoritative_sdl.read_bytes(),
+        read_authoritative_schema(authoritative_sdl),
         str(authoritative_sdl),
         semantic_overlay=DEFAULT_SEMANTIC_OVERLAY,
     )

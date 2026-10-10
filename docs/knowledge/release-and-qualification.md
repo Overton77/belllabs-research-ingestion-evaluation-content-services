@@ -1,7 +1,7 @@
 ---
 type: Concept
 title: Release gates and proof status
-description: The four proof statuses, the G0 to G7 release gates, the C0 to C4 compute profiles and ProofBudget, what is live today against the still-not-done list, the 2026-10-08 fast-track position - release 1.1.0 and the Cursor lane qualification, both proven only on disposable infrastructure, with no live mission run - and the 2026-10-09 multi-provider position per lane profile.
+description: The four proof statuses, the G0 to G7 release gates, the C0 to C4 compute profiles and ProofBudget, what is live today against the still-not-done list, the 2026-10-08 fast-track position - release 1.1.0 and the Cursor lane qualification, both proven only on disposable infrastructure, with no live mission run - and the 2026-10-10 multi-provider position per lane profile (no profile live-qualified, hosted parity blocked).
 tags: [mission-control, release, qualification, gates, compute, evidence]
 ---
 
@@ -97,20 +97,22 @@ The fast-track packet is implemented and merged to `main` at `f8d325a`. Its evid
 
 The evidence by spec is in `docs/MISSION_CONTROL_IMPLEMENTATION_STATUS.md` (fast-track section).
 
-## Multi-provider position (2026-10-09)
+## Multi-provider position (2026-10-10)
 
-The multi-provider packet (`docs/specs/multi-provider-2026-10/`) has waves 0 to 2 integrated as an
-uncommitted working state on `7c9b755`; wave 3 is in flight and not integrated. The per-profile
-statement follows VALIDATION.md and is published as the
-[release statement](../qualification/release/multi-provider-2026-10.md); a summary table is in
-[qualification](qualification.md). In short: a local `deep_agents` baseline (production launch,
-chains, Human Gates) is proven with deterministic cognition on disposable PostgreSQL 17 and local
-Temporal, but is not account-qualified; Cursor stays unqualified (drill unrun); Claude Agent SDK
-and Codex have no harness on the base; `claude_cloud` and `codex_cloud` are Outcome 3, so hosted
-parity (MP-21) is blocked and the packet must not be called all-provider complete. Release 1.1.0
-now carries 0031 and 0032 (fingerprint `sha256:672549cd...`), unlocked and not applied live
-([persistence](persistence.md)). B1 and B7 are closed in code (the production launch author and
-the public aliases) but B1 still needs the owner's bindings file.
+The multi-provider packet (`docs/specs/multi-provider-2026-10/`) is integrated as an uncommitted
+working tree on the local branch `mp/integration-recovery-2026-10-09`. The per-profile statement
+follows VALIDATION.md and is the [release statement pass 2](../qualification/release/multi-provider-2026-10.md);
+the summary table is in [qualification](qualification.md). In short: Deep Agents, Claude Agent SDK,
+Codex, Cursor local and Cursor cloud are composed through the production launch path and proven
+offline, on disposable PostgreSQL 17 and on local Temporal with FIXTURE provider clients (MP-20
+Stage Graph, GoalDirected and Mission Chain parity). **No profile is live-qualified** by this packet:
+every G4 drill (`make lane-qualify PROFILE=... LIVE=1`, finite budget, owner-run) is unrun, and no
+account is enabled. `claude_cloud` and `codex_cloud` stay Outcome 3 after the 2026-10-09
+revalidation, so MP-18, MP-19 and hosted parity (MP-21) are evidence-blocked and the packet must
+not be called all-provider complete. Release 1.2.0 (0001-0033, fingerprint `sha256:0113df03...`) is
+built on disposable clusters only; the locks still pin 1.1.0 and the live projects hold 1.0.0
+([persistence](persistence.md)). B1 and B7 are closed in code; a real start still needs the
+owner's bindings file.
 
 ## A self-contradiction in the status document
 

@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parents[3]
 SEEDS = ROOT / "packages" / "mission-control-db-contract" / "seeds"
 EXPECTED = {
     ("mc.catalog.workflow-parity", "1.0.0"),
+    ("mc.catalog.workflow-parity", "1.0.1"),
     ("mc.catalog.runtime-profiles", "1.0.0"),
     ("mc.catalog.approved-assets", "1.0.0"),
     ("mc.catalog.approved-assets", "1.0.1"),
@@ -76,9 +77,13 @@ def test_each_app_installation_set_is_valid_and_dependency_closed(app: str) -> N
     skills = [(f"mc.app.{app}.agent-skills", "1.0.0")]
     storage = [("mc.storage.capability-bundles", "1.0.0")]
     # Succession of the applied, frozen approved-assets@1.0.0 (new logical keys only).
-    successors = [("mc.catalog.approved-assets", "1.0.1")]
+    successors = [
+        ("mc.catalog.approved-assets", "1.0.1"),
+        ("mc.catalog.workflow-parity", "1.0.1"),
+    ]
     assert sorted(keys) == sorted(base + agent + skills + storage + successors)
     assert position_of(keys, successors[0]) > position_of(keys, base[2])
+    assert position_of(keys, successors[1]) > position_of(keys, base[0])
     assert [key for key in keys if key in base] == base
     position = {key: index for index, key in enumerate(keys)}
     assert (
@@ -130,6 +135,27 @@ def test_approved_assets_successor_never_rewrites_an_applied_logical_key() -> No
     assert {"seed_key": "mc.catalog.approved-assets", "seed_version": "1.0.0"} in successor[
         "depends_on"
     ]
+
+
+def test_workflow_parity_successor_never_rewrites_an_applied_logical_key() -> None:
+    by_version = {
+        b["seed_version"]: b
+        for b in _bundles("common")
+        if b["seed_key"] == "mc.catalog.workflow-parity"
+    }
+    frozen, successor = by_version["1.0.0"], by_version["1.0.1"]
+    held = {record["logical_key"] for record in frozen["records"]}
+    assert successor["records"]
+    assert not held & {record["logical_key"] for record in successor["records"]}
+    assert {"seed_key": "mc.catalog.workflow-parity", "seed_version": "1.0.0"} in successor[
+        "depends_on"
+    ]
+    # The families as the worker registers them now include the Human Gate workflow.
+    families = [r for r in successor["records"] if r["kind"] == "asset_version"]
+    assert all(
+        "HumanGateWorkflow" in record["fields"]["manifest"]["temporal_workflows"]
+        for record in families
+    )
 
 
 def test_qualification_bundle_is_opt_in_and_closes_over_common() -> None:
@@ -221,7 +247,11 @@ def test_published_definition_assets_are_exact_and_repository_readable() -> None
 
 
 def test_changed_bytes_change_the_seed_digest() -> None:
-    (bundle,) = [b for b in _bundles("common") if b["seed_key"] == "mc.catalog.workflow-parity"]
+    (bundle,) = [
+        b
+        for b in _bundles("common")
+        if (b["seed_key"], b["seed_version"]) == ("mc.catalog.workflow-parity", "1.0.0")
+    ]
     original = {key: value for key, value in bundle.items() if key != "seed_digest"}
     changed = json.loads(json.dumps(original))
     changed["records"][0]["fields"]["manifest"]["family"] = "Invented"

@@ -1,12 +1,12 @@
 """MP-15 coordinator inbox on a disposable PostgreSQL 17 (restricted runtime login, forced RLS).
 
-The coordinator tables are a PROPOSED migration (0033, not allocated): each test applies
-`PROPOSED_0033_DDL` to its own scratch database (created and dropped by `common_db`) on top
-of the real 0001..0031 component, so the adapter is proven against the proposed DDL, never
-against a shipped migration. Events come from real admissions, real MP-10 Human Gate tasks
-(`human_task.created`) and real `queue_instruction` commands through `MissionControlService`
-and the command mailbox. Token/tool delta events are appended through the canonical ledger
-writer as a FIXTURE standing in for frame-derived facts (no provider runs here).
+The coordinator tables are released in common migration 0033 (component 1.2.0, section 2):
+each test runs on its own scratch database (created and dropped by `common_db`) built from the
+released chain 0001..0033, so the adapter is proven against the shipped migration. Events
+come from real admissions, real MP-10 Human Gate tasks (`human_task.created`) and real
+`queue_instruction` commands through `MissionControlService` and the command mailbox.
+Token/tool delta events are appended through the canonical ledger writer as a FIXTURE standing
+in for frame-derived facts (no provider runs here).
 
 Proves:
 - an offline coordinator recovers every pending notification once by id (two concurrent
@@ -38,7 +38,6 @@ from mission_control.adapters.postgres.run_control.run_control_repository import
     PostgresRunControlRepository,
 )
 from mission_control.adapters.postgres.subscriptions.coordinator_inbox import (
-    PROPOSED_0033_DDL,
     PostgresCoordinatorInboxStore,
 )
 from mission_control.adapters.postgres.subscriptions.store import PostgresSubscriptionStore
@@ -88,13 +87,8 @@ COORDINATOR = coordinator_actor()
 
 @pytest_asyncio.fixture
 async def inbox_db(common_db: CommonDatabase) -> AsyncIterator[CommonDatabase]:  # noqa: F811
-    """The scratch database plus the PROPOSED 0033 coordinator tables (test-only DDL)."""
+    """The scratch database; the coordinator tables come from released migration 0033."""
 
-    owner = await asyncpg.connect(common_db.owner_dsn)
-    try:
-        await owner.execute(PROPOSED_0033_DDL)
-    finally:
-        await owner.close()
     yield common_db
 
 

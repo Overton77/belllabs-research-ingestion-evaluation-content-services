@@ -496,6 +496,24 @@ class StageInputBinding:
 
 
 @dataclass(frozen=True)
+class StageAuthoredInput:
+    """MP-20 (SPEC-02): one authored manifest input that a dependency delivers to a stage.
+
+    A manifest node's ``inputs[]`` entry ``{name, from: "<producer>.<output>", expand}`` names
+    the binding (``inputs/<name>/``) and the expansion tier of what the producer's dependency
+    delivers. The frozen blueprint keeps its ``from:<producer>`` slot ids (digests of compiled
+    definitions are unchanged); this travels beside it in the run input and the admission
+    request, and is absent for every run without authored inputs.
+    """
+
+    consumer_stage_id: str
+    producer_stage_id: str
+    producer_output_slot_id: str
+    name: str
+    expand: Literal["inline", "reference", "materialize", "auto"] = "auto"
+
+
+@dataclass(frozen=True)
 class DependencyProjection:
     dependency_id: str
     generation: int = 1
@@ -664,6 +682,14 @@ class StageGraphCompletionProposal:
     # is closed; unresolved dependencies are cancelled, not pending; the reducer decides the
     # `cancelled` outcome once budgets and effects are settled.
     cancelled: bool = False
+    # MP-20 (01-STAGE_GRAPH §6-7, SPEC-03 "Reject closes the gate as not accepted"): a
+    # concluded-without-acceptance completion. Nothing is admitted or running, at least one
+    # stage failed (or its Human Gate was not accepted) and every stage still waiting for
+    # release is conclusively unreleasable (`skipped_stage_ids`), so no required release
+    # condition can ever resolve. The reducer records the `failed` outcome from the failed
+    # stages; it is never a completion with accepted obligations it does not have.
+    failed: bool = False
+    skipped_stage_ids: tuple[str, ...] = ()
 
     @property
     def can_terminalize(self) -> bool:
@@ -671,6 +697,8 @@ class StageGraphCompletionProposal:
             return False
         if self.cancelled:
             return True
+        if self.failed:
+            return not self.pending_dependency_ids
         return self.required_obligations_accepted and not self.pending_dependency_ids
 
 
@@ -772,6 +800,8 @@ class StageGraphAdmissionActivityRequest:
     correlation_id: str
     semantic_input_binding_ref: str = ""
     effective_configuration_digest: str = ""
+    # MP-20: the run's authored stage inputs (`StageGraphRunInput.authored_inputs`).
+    authored_inputs: tuple[StageAuthoredInput, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -969,6 +999,9 @@ class StageGraphRunInput:
     # of operation children; empty for every run admitted before MP-10.
     human_gates: tuple[HumanGateSpec, ...] = ()
     human_gate_poll_seconds: int = 300
+    # MP-20: authored manifest input names and expansion tiers of the stages' dependency
+    # slots, delivered to the Context Packer with each admission; empty before MP-20.
+    authored_inputs: tuple[StageAuthoredInput, ...] = ()
 
 
 @dataclass(frozen=True)

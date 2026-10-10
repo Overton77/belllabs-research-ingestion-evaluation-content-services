@@ -31,9 +31,11 @@ from mission_control.adapters.temporal.versioning import (
 )
 from mission_control.bootstrap.api import MissionDeployment
 from mission_control.bootstrap.preflight import temporal_targets
+from mission_control.domain.execution.lanes import LANE_PROFILES
 from mission_control.domain.programs.search_attributes import (
     BELLLABS_CORE_SEARCH_ATTRIBUTES,
     BELLLABS_SEARCH_ATTRIBUTES,
+    MC_LANES,
     MISSION_VISIBILITY_SEARCH_ATTRIBUTES,
     SQL_VISIBILITY_SLOTS,
     MissionVisibilityValues,
@@ -228,7 +230,7 @@ def test_mission_visibility_values_map_to_typed_attributes() -> None:
     [
         {"run_id": ""},
         {"run_id": "r", "mission_id": ""},
-        {"run_id": "r", "lane": "codex"},
+        {"run_id": "r", "lane": "codex_remote"},
         {"run_id": "r", "phase": "paused"},
         {"run_id": "r", "forked_from_run_ids": ("r",)},
         {"run_id": "r", "forked_from_run_ids": ("",)},
@@ -243,6 +245,10 @@ def test_lane_and_phase_vocabulary() -> None:
     assert lane_for_runtime("deep_agent") == "deep_agents"
     assert lane_for_runtime("native") is None
     assert lane_for_runtime("cursor", "cursor_cloud") == "cursor_cloud"
+    # MP-07/MP-08 recovery: every declared Lane Profile is a visibility value.
+    assert lane_for_runtime("claude", "claude_agent_sdk") == "claude_agent_sdk"
+    assert lane_for_runtime("codex", "codex") == "codex"
+    assert MC_LANES == LANE_PROFILES
     with pytest.raises(ValueError):
         lane_for_runtime("cursor", "cursor_remote")
     assert phase_for_disposition("completed") == "completed"

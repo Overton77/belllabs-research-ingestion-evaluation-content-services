@@ -19,6 +19,11 @@ persisted. ``ManifestProgramCompiler`` is the same lowering with ``persist=True`
 
 Lane behavior support is a static table here (marked for replacement): the G1 lane describe
 (``mc.lane_describe.v1``) carries controls, hooks and subagents but no behavior matrix yet.
+
+MP-02: step 1 dispatches on the document's ``manifest:`` literal. ``mission/v1`` takes the
+exact v1 parser and every v1 step above unchanged; ``mission/v2`` parses the v2 model, checks
+hook events on the provider lanes too, and admits every node role's ``requires`` against its
+lane's declared matrix (V01, ``manifest_v2_admission``) before anything is lowered.
 """
 
 from __future__ import annotations
@@ -31,6 +36,10 @@ from typing import Any, Protocol
 from mission_control.application.authoring.control_plane_repository import (
     DefinitionRepository,
     InMemoryDefinitionRepository,
+)
+from mission_control.application.authoring.manifest_v2_admission import (
+    V2_LANE_BEHAVIORS,
+    admit_mission,
 )
 from mission_control.application.authoring.service import ControlPlaneService
 from mission_control.application.capabilities.capability_search import CapabilitySearchService
@@ -87,7 +96,6 @@ from mission_control.domain.authoring.manifest import (
     MissionBlock,
     MissionManifest,
     NodeEnvironment,
-    parse_manifest_yaml,
     resolve_environments,
     walk_program,
 )
@@ -98,6 +106,7 @@ from mission_control.domain.authoring.manifest_lowering import (
     lower_mission,
     lowering_digests,
 )
+from mission_control.domain.authoring.manifest_v2 import is_v2, parse_manifest_yaml_versioned
 from mission_control.domain.authoring.mission_definition import (
     CapabilityPin,
     DefinitionCapability,
@@ -458,7 +467,8 @@ class ManifestCompileService:
     async def compile(self, manifest_yaml: str, scope: ManifestScope) -> ManifestCompilation:
         at = scope.at or datetime.now(UTC)
         try:
-            manifest, document = parse_manifest_yaml(manifest_yaml)
+            # `mission/v1` takes the exact v1 parser; `mission/v2` the v2 model (MP-02).
+            manifest, document = parse_manifest_yaml_versioned(manifest_yaml)
         except ManifestRejected as rejected:
             return ManifestCompilation(
                 manifest=None,
@@ -520,9 +530,17 @@ class ManifestCompileService:
             await self._resolve_mission(mission, scope, resolved, plugins, blockers, warnings)
         lane_support: list[LaneSupport] = []
         hook_events: list[HookEventSupport] = []
+        v2 = is_v2(manifest)
         for mission in missions:
-            self._lanes(mission, lane_support, hook_events, blockers, warnings)
+            self._lanes(mission, lane_support, hook_events, blockers, warnings, v2=v2)
             self._coverage(mission, blockers, warnings)
+            if v2:
+                # V01: every node role's `requires` against its lane's declared matrix.
+                admitted_blockers, admitted_warnings = admit_mission(
+                    mission.block, mission.pointer, mission.nodes
+                )
+                blockers.extend(admitted_blockers)
+                warnings.extend(admitted_warnings)
         programs: list[CompiledMission] = []
         lowerings: list[MissionLowering] = []
         resolved_definitions = [
@@ -1019,14 +1037,17 @@ class ManifestCompileService:
         hook_events: list[HookEventSupport],
         blockers: list[ManifestIssue],
         warnings: list[ManifestIssue],
+        *,
+        v2: bool = False,
     ) -> None:
+        behaviors = V2_LANE_BEHAVIORS if v2 else LANE_BEHAVIORS
         for node in mission.nodes:
-            supported = node.behavior in LANE_BEHAVIORS[node.lane]
+            supported = node.behavior in behaviors[node.lane]
             reason = None
             if not supported:
                 reason = (
                     "lane_reserved_in_v1"
-                    if node.lane in {Lane.CLAUDE_AGENT_SDK, Lane.CODEX}
+                    if not v2 and node.lane in {Lane.CLAUDE_AGENT_SDK, Lane.CODEX}
                     else "behavior_unsupported_on_lane"
                 )
                 blockers.append(
@@ -1048,7 +1069,7 @@ class ManifestCompileService:
                     reason=reason,
                 )
             )
-            if node.lane in {Lane.CLAUDE_AGENT_SDK, Lane.CODEX}:
+            if not v2 and node.lane in {Lane.CLAUDE_AGENT_SDK, Lane.CODEX}:
                 continue
             environment = node.effective_environment
             for index, hook in enumerate(environment.hooks or ()):

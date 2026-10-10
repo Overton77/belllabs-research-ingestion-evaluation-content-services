@@ -23,6 +23,7 @@ from typing import Literal
 
 from mission_control.domain.execution.contracts import OperationExecutionRequest
 from mission_control.domain.execution.lanes import LaneSegmentBounds
+from mission_control.domain.execution.usage_admission import LimitWaitPolicy
 
 OperationHeartbeatClass = Literal["deep_agent", "deep_agent_async_children", "bound"]
 # temporalio throttles heartbeat sends to `heartbeat_timeout * 0.8`, capped by the worker's
@@ -64,6 +65,8 @@ class OperationHeartbeatPolicy:
     # FT-G2: run Deep Agents units through the `lane.turn` segment loop (Cursor units always
     # are). Off by default: `operation.execute` stays the Deep Agents path until FT-G6.
     deep_agent_segment_loop: bool = False
+    # MP-05: the capacity-wait bounds every operation request carries (None: the defaults).
+    capacity_wait: LimitWaitPolicy | None = None
 
     def __post_init__(self) -> None:
         for value in self.timeouts().values():
@@ -94,6 +97,14 @@ class OperationHeartbeatPolicy:
             return LaneSegmentBounds(
                 heartbeat_timeout_s=min(self.timeout_for(operation), 600),
                 busy_wait_s=min(binding.budgets.wall_clock_s, 86_400),
+            )
+        if operation.execution_runtime in ("claude", "codex"):
+            provider = operation.provider_binding
+            assert provider is not None
+            # MP-07/MP-08: the same Session Lane bounds, from the `mc.execution_binding.v2`.
+            return LaneSegmentBounds(
+                heartbeat_timeout_s=min(self.timeout_for(operation), 600),
+                busy_wait_s=min(provider.budgets.wall_clock_s, 86_400),
             )
         if self.deep_agent_segment_loop and operation.execution_runtime == "deep_agent":
             return LaneSegmentBounds()

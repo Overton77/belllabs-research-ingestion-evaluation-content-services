@@ -22,6 +22,7 @@ from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
 from mission_control.adapters.temporal.operation_activities import OperationExecutionActivities
+from mission_control.application.context.lane_support import ContinuationInFlight
 from mission_control.application.execution.harness.dispatch import (
     ProviderCapacityLimited,
     SessionOwnedElsewhere,
@@ -156,6 +157,12 @@ class LaneTurnActivities:
             # A takeover fenced this attempt out; its result must never be applied.
             raise ApplicationError(
                 str(error), type=STALE_SESSION_OWNER, non_retryable=True
+            ) from error
+        except ContinuationInFlight as error:
+            # MP-12: the session is frozen for a continuation; nothing was sent. Retried after
+            # a short delay, by when the operation workflow has advanced or ended the transfer.
+            raise ApplicationError(
+                str(error), type=error.code, next_retry_delay=timedelta(seconds=5)
             ) from error
         except ProviderCapacityLimited as error:
             raise ApplicationError(

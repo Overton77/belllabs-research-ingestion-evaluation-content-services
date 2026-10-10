@@ -1,10 +1,12 @@
 ---
 type: Implementation Evidence
 title: Mission Control implementation and parity evidence
-description: "mission_control component, qualified on two local disposable databases and installed live in both Supabase projects (release 1.0.0, owner-approved 2026-10-03; no application traffic yet), plus the 2026-10-08 fast-track packet status per specification (merged at f8d325a, release 1.1.0 built but not applied live, no live mission run). See the fast-track and common component sections. The 2026-10 multi-provider packet (waves 0 to 2 integrated uncommitted on 7c9b755, wave 3 in flight, hosted parity blocked) has its own section."
+description: "mission_control component, qualified on two local disposable databases and installed live in both Supabase projects (release 1.0.0, owner-approved 2026-10-03; no application traffic yet), plus the 2026-10-08 fast-track packet status per specification (merged at f8d325a, release 1.1.0 built but not applied live, no live mission run). See the fast-track and common component sections. The 2026-10 multi-provider packet (all local lanes integrated uncommitted on the recovery branch, no profile live-qualified, hosted parity blocked) has its own section."
 tags: [mission-control, status, evidence]
 ---
 # Mission Control implementation and parity evidence
+
+> **Multi-provider packet, 2026-10-10:** the [multi-provider section](#multi-provider-packet-2026-10) reflects the 2026-10-09 recovery integration (uncommitted on the local branch `mp/integration-recovery-2026-10-09`); the [2026-10-10 handoff](specs/multi-provider-2026-10/HANDOFF-2026-10-10.md) supersedes the [recovery audit](specs/multi-provider-2026-10/RECOVERY-HANDOFF-2026-10-09.md)'s state claims. No profile is live-qualified and hosted parity is blocked. Earlier qualification records remain historical evidence.
 
 Status (2026-10-03): `production_common` is implemented locally on the common
 `mission_control` component, qualified on two local disposable databases and
@@ -27,129 +29,81 @@ was performed. Existing unrelated working-tree changes are preserved.
 ## Multi-provider packet (2026-10)
 
 The multi-provider packet (`docs/specs/multi-provider-2026-10/`, Linear parent OVE-63, MP-01 to
-MP-23) is partly implemented as an **uncommitted working state on `7c9b755`**: nothing is
-committed, pushed, deployed or migrated live, and no paid provider call was made. State as of
-2026-10-09, from the team ledger (`.scratch/multi-provider-2026-10-08/team/LEDGER.md`) and the
-ticket handoffs beside it; written by MP-23 pass 1. The per-profile statement is
-[`qualification/release/multi-provider-2026-10.md`](qualification/release/multi-provider-2026-10.md);
-the behavior is described in the knowledge bundle
-([human gates](knowledge/human-gates.md), [mission stream](knowledge/mission-stream.md),
-[session ownership and dispatch](knowledge/session-ownership-and-dispatch.md),
-[operations](knowledge/operations.md), [persistence](knowledge/persistence.md)).
+MP-23) is integrated as an **uncommitted working tree on the local branch
+`mp/integration-recovery-2026-10-09`** (cut from `efa55f9`) in the canonical checkout. The
+2026-10-09 recovery session ported the five late worktrees (MP-07/08/09/11/12), fixed the audit's
+blockers A to D, composed every local lane and finished MP-15 and MP-20. Nothing is committed,
+pushed, deployed, locked or applied live; no provider login, paid or account-bound call was made.
+State as of 2026-10-10 from the team ledger (`.scratch/multi-provider-2026-10-08/team/LEDGER.md`,
+entries from "2026-10-09 ~17:00" on); written by MP-23 pass 2. The per-profile statement and
+verdict are in [`qualification/release/multi-provider-2026-10.md`](qualification/release/multi-provider-2026-10.md);
+the session record, remaining work and resume steps are in
+[HANDOFF-2026-10-10](specs/multi-provider-2026-10/HANDOFF-2026-10-10.md).
+
+**Verdict: the all-provider objective is not complete.** No profile is live-qualified and the
+hosted profiles are Outcome 3 (revalidated 2026-10-09), so MP-18, MP-19 and MP-21 are
+evidence-blocked. The local baseline (Deep Agents, Claude Agent SDK, Codex, Cursor local and cloud)
+is implemented and proven offline, on disposable PostgreSQL 17 and on local Temporal with FIXTURE
+provider clients.
 
 ### Per-ticket state
 
-"Integrated" means ported into the owner checkout and checked there. The Linear states named are
-the last ones the ledger records; the 2026-10-09 session did not update Linear.
+"Integrated" means present in the canonical checkout's working tree and checked there. Evidence
+counts are the ledger's; Linear was not updated by any Claude Code session (owner action).
 
-| Ticket | Linear | State | Evidence or reason |
-| --- | --- | --- | --- |
-| MP-01 contracts, seven profiles, migration 0031 | OVE-64 | integrated | handoff MP-01; ADR-0035 `proposed` |
-| MP-02 production launch inputs, chain relay | OVE-65 | integrated and reviewed | handoff MP-02; `test_manifest_launch_production.py` |
-| MP-03 projections, hosted environment resolver | OVE-66 | integrated | handoff MP-03 |
-| MP-04 workspace leases and snapshots | OVE-67 (Done) | integrated | handoff MP-04; `test_workspace_lease_races.py` |
-| MP-05 auth routes, usage and capacity rules | OVE-68 | integrated; settings applied | handoff MP-05; no production caller yet |
-| MP-06 session ownership, dispatch journal | OVE-69 | integrated and wired 2026-10-09 | handoff MP-06; ledger 2026-10-09 |
-| MP-07 Claude Agent SDK lane | OVE-70 | in flight (wave 3), not integrated | worktree `mp/MP-07-claude-lane` |
-| MP-08 Codex app-server lane | OVE-71 | in flight, not integrated | worktree `mp/MP-08-codex-lane` |
-| MP-09 Cursor local/cloud parity | OVE-72 | in flight, not integrated | worktree `mp/MP-09-cursor-parity` |
-| MP-10 Human Gates | OVE-73 | integrated and wired 2026-10-09 | no handoff file; ledger 2026-10-09; `test_mp10_human_gate_restart.py` |
-| MP-11 approval bindings, governed MCP fallback | OVE-74 | in flight, not integrated | worktree `mp/MP-11-approvals` |
-| MP-12 continuation and compaction wiring | OVE-75 | in flight, not integrated | worktree `mp/MP-12-continuation` |
-| MP-13 frames, lineage, public aliases | OVE-76 (Done) | integrated | handoff MP-13 |
-| MP-14 `/missions` Socket.IO | OVE-77 | integrated and wired 2026-10-09 | handoff MP-14; `test_mission_socket_postgres.py` |
-| MP-15 coordinator subscriptions | OVE-78 | in flight, not integrated | worktree `mp/MP-15-coordinator-subscriptions` |
-| MP-16 hosted Claude Code feasibility | OVE-79 | done: Outcome 3, stays unqualified | `qualification/lanes/claude_cloud/FEASIBILITY.md` |
-| MP-17 hosted Codex feasibility | OVE-80 | done: Outcome 3, stays unqualified | `qualification/lanes/codex_cloud/FEASIBILITY.md` |
-| MP-18 Claude-hosted lane | OVE-81 | blocked (Outcome 3) | no documented hosted lifecycle |
-| MP-19 Codex-hosted lane | OVE-82 | blocked (Outcome 3) | as above |
-| MP-20 local and Cursor parity | OVE-83 | not started | blocked by the wave-3 tickets |
-| MP-21 hosted parity | OVE-84 | blocked | needs MP-18 and MP-19 |
-| MP-22 local profiles, readiness, cluster guard | OVE-85 | integrated and wired 2026-10-09 | handoff MP-22; migration 0032 |
-| MP-23 release evidence and documentation | OVE-86 | in flight: pass 1 (this section) | pass 2 follows the wave-3 integration |
+| Ticket | Linear | State | Evidence | Open |
+| --- | --- | --- | --- | --- |
+| MP-01 contracts, seven profiles, 0031 | OVE-64 | implemented, integrated | `test_lane_contracts.py`, `test_lane_bindings.py`; `MissionLane`/`MC_LANES` now equal the seven profiles | ADR-0035 `proposed` |
+| MP-02 production launch, chain relay | OVE-65 | implemented, integrated; blocker A fixed (undeclared Goal Loop reviewer = `owner`) | chain tests on real Temporal + PG 7 passed; mission/v2 provider launch, Cursor launch author | owner production bindings file |
+| MP-03 projections, materialization | OVE-66 | implemented, integrated | projection goldens; lane `rows=` executable checks | lane-neutral projection helpers still live in `adapters/cursor/projection.py` (imported by Claude and Codex) |
+| MP-04 workspace leases, snapshots | OVE-67 | implemented, integrated; git backend moved to `adapters/workspaces/` (MP-09) | `test_workspace_lease_races.py` | — |
+| MP-05 auth routes, usage, capacity | OVE-68 | implemented, integrated; capacity policy now effective (`OperationWorkflowRequest.capacity_wait`); auth admission composed into the Claude and Codex lanes | replay suites, `test_mp05_limit_wait` and operations/runtime units 363 passed | `mc.auth_admission.v1` persistence deferred; no route account-enabled (owner profiles) |
+| MP-06 session ownership, dispatch journal | OVE-69 | implemented, integrated; `reconcile_dispatch` now on Claude, Codex, Cursor local and cloud, `SteeringLane` on Codex | MP-06 drills on real PG + Temporal | typed owner/journal columns deferred; steer not journaled; no OS-process kill drill |
+| MP-07 Claude Agent SDK lane | OVE-70 | implemented, integrated (recovery port + completion) | unit 79; production `OperationWorkflow` routing with replay, broker on released 0033, continuation on Temporal | live drill; Linux/WSL worker; `pause`, `fork`, compaction, environment selection unqualified |
+| MP-08 Codex app-server lane | OVE-71 | implemented, integrated; handoff reconstructed; failure B fixed | unit 107; `test_mp08_codex_lane_turns.py` 3/3 on four runs; approvals on real PG; continuation drill | live drill; codex-cli on a WSL/Linux worker; two continuation restart cases |
+| MP-09 Cursor parity | OVE-72 | implemented, integrated; blocker D fixed (lease takeover test); v2 describes | `tests/unit/cursor` 37; MP-20 Cursor rows | OVE-55 drill; hooks/plugins of Missions 2/3 need a `mc.cursor_binding.v1` field |
+| MP-10 Human Gates | OVE-73 | implemented, integrated; production gate lowering; denied gate fails the run | `test_mp10_human_gate_restart.py`; MP-20 V09 | manifest cannot express remediation or a default answer; technical coordinator mount |
+| MP-11 approvals, governed effects | OVE-74 | implemented, integrated (broker, approval tasks, governed tools, cancel closes approvals) | unit approvals 41; `test_mp11_*_postgres.py`; Claude/Codex broker tests | Cursor native approvals unsupported by the vendor pin |
+| MP-12 continuation and compaction | OVE-75 | implemented, integrated; production composition (ADR-0041 `proposed`) | unit continuation 39; replay 47; `test_mp12_continuation.py`; Claude and Codex continuation on Temporal | typed phase columns deferred; Deep Agents requests recorded only; policy per worker |
+| MP-13 frames, lineage | OVE-76 | implemented, integrated; Claude/Codex kinds rows, `LaneFrame.subordinate_ref` | frame suites | — |
+| MP-14 mission Socket.IO | OVE-77 | implemented, integrated; SPEC-04 completion (lineage, descendants, watchdog, receipts, chain targets, `CURSOR_EXPIRED`) | unit 342; real PG/uvicorn/Redis 28 | retention by inference; no browser interop or load test; Redis hint publishers unwired |
+| MP-15 coordinator subscriptions | OVE-78 | implemented, integrated (parts A and B, 0033, HTTP inbox) | real PG MP-15 suites; bootstrapped API on 1.2.0 3 passed | technical coordinator mount unchanged |
+| MP-16 / MP-17 hosted feasibility | OVE-79 / OVE-80 | done: Outcome 3, revalidated 2026-10-09 | `qualification/lanes/{claude_cloud,codex_cloud}/` | — |
+| MP-18 / MP-19 hosted lanes | OVE-81 / OVE-82 | evidence-blocked | 13 / 14 vendor operations missing | vendor operations |
+| MP-20 local and Cursor parity | OVE-83 | implemented at G1-G3 with FIXTURE providers; G4 blocked | [parity record](qualification/parity/multi-provider-2026-10-09.md); last recorded 32 passed + 1 xfailed | rerun after the final fixes; see the handoff |
+| MP-21 hosted parity | OVE-84 | blocked | needs MP-18 and MP-19 | — |
+| MP-22 local profiles, cluster guard | OVE-85 | implemented, integrated | 0032; readiness and outage drills | deltas 5/6 (schema promotion, module split) deferred |
+| MP-23 release docs | OVE-86 | pass 2 written (this section) | release statement pass 2 | final validation run to record |
 
-The integrator allocated migration 0032 (`run_cluster_binding`, stream-hint triggers) and the
-`UNAVAILABLE` / `UNSUPPORTED_OPERATION` stream error codes; the next free migration is 0033 and the
-next free ADR is 0041. Release 1.1.0 (0001-0032) was rebuilt on the disposable PostgreSQL 17:
-fingerprint `sha256:672549cd78eda02e30f5f153ffdbf6882ec9643af0864ebf94232a1a041a84d6`. The release
-locks still pin the committed 0001-0030 manifest.
+Shared decisions of the recovery session: release **1.2.0** = 0001-0033 with locked 1.1.0 as
+declared predecessor (fingerprint `sha256:0113df03…`, disposable clusters only; next free migration
+0034); the describe convention (`native`/`emulated` with `qualified=False` where implemented);
+Session Lane routing (`SESSION_LANE_RUNTIMES = {cursor, claude, codex}` always segment-driven on
+their binding's queue); Session Lane attempt recording; workspace-candidate output custody; served
+lane task queues (`MISSION_CONTROL_LANE_TASK_QUEUES`). Next free ADR is 0042.
 
 ### Check results
 
-Passed (ledger, owner checkout, 2026-10-09, after all integrator wiring): ruff check and format
-clean; mypy clean (544 source files); the unit selections
-`tests/unit/{runtime,mission_control,authoring,chains,run_control,socketio,streams}` plus
-`tests/architecture` (617 passed) and
-`tests/unit/{run_control/test_run_launch,control_plane/test_digest_set_order_guard,human_tasks}`
-(93 passed); `mission-db release-build` built. On real PostgreSQL 17, Temporal and Redis,
-`test_release_0032_cluster_binding_and_stream_hints`, `test_mission_socket_postgres`,
-`test_mission_control_bootstrap_postgres`, `test_chain_release`, `test_mp22_db_release_preflight`,
-`test_mp22_local_profile_start`, `test_manifest_launch_production`, `test_mp10_human_gate_restart`,
-`test_mp22_outage_drill` and `test_human_gate_tasks_postgres` gave 25 passed.
+Recorded in the ledger on the integration branch (2026-10-09): mypy clean (601 source files); full
+`tests/integration/postgres` **219 passed, 1 failed** (`test_mission_worker_startup[True]`, the
+readiness gate refusing `PIN_DRIFT` on the workspace `agent-browser` bundle; owner action);
+db-contract package suite **65 passed**; release 1.2.0 built; saved-history replay 47 passed;
+targeted selections listed per ticket above. The audit's 12 unit failures were addressed in this
+session: resource-root contract (`capability_pins.workspace_path`), canonical Biotech schema
+source (`tests/unit/schema` 81 passed), agent-skill seeds limited to the five non-hosted profiles
+and `mc.catalog.workflow-parity@1.0.1` (seed tests 20 passed).
 
-Failed:
+Unrun or unrecorded: a full `tests/unit` run and `make ci` on the final tree; the MP-20 suite after
+the last integrator fixes; a Linux/WSL worker; Temporal Cloud; every live drill. These belong to the
+release statement's "Final validation run" section.
 
-- `test_mission_worker_startup[True]` (1): the worker readiness gate refuses with `PIN_DRIFT` on
-  the workspace `agent-browser` bundle (owner decision 1 below). Not a code defect.
-- db-contract package suite, 62 passed and 2 failed: `test_fresh_install_repeat_noop_and_identical_fingerprints`
-  and `test_upgrade_from_declared_predecessor` still expect component version `1.0.0`. Both fail at
-  `7c9b755` (owner cleanup, not touched).
-- The 11 expected unit failures on the owner checkout. The last full run there was `make check`
-  before the wave-2 port: 2183 passed, 11 failed, 19 skipped.
-  - 6 `tests/unit/schema/*`: `biotech-kg/typedefs.graphql` and
-    `biotech-kg/src/schema/neo4jbiotechschema.graphql` are absent on this host (pre-existing at
-    `7c9b755`).
-  - 5 from the workspace `agent-browser` drift: `test_agent_skill_seeds` ×3,
-    `test_catalog_seed_bundles` ×1 and
-    `test_capability_pins_and_runtime_ports::test_workspace_artifacts_verify_against_their_pins_when_present`.
-    Only owner decision 1 clears them. The CRLF lock (owner decision 2) decides whether
-    `test_bundle_custody` passes on an LF checkout.
-- Full unit suite on the MP-23 worktree (2026-10-09; staged base = owner state at the MP-23 cut;
-  log `.scratch-handoff/mp23-unit-full.log` in that worktree): 2272 passed, 24 failed, 19 skipped,
-  2 xfailed. The 24 are the 11 above plus 13 worktree-environment failures:
-  - `test_bundle_custody` ×4: an LF checkout against the CRLF lock;
-  - `test_reviewed_capability_promotion` ×6: `.agents/skills` is resolved beside the worktree;
-  - `test_workspace_locators_cannot_escape_the_workspace` ×1: the `.tools` junction beside the
-    worktree is a link;
-  - `test_provider_auth_composition::test_worker_context_sees_names_and_locations_never_values` ×1:
-    a worktree has no `.env`, so `tests/conftest.py` sets the `OPENAI_API_KEY` placeholder, which the
-    test's `Settings` then binds (a test-isolation defect, reported);
-  - `test_live_settings_pin_workspace_npx_and_bundled_node` ×1: the bundled node is absent.
+### Owner actions still open
 
-Blocked: every live provider drill and account qualification (no paid or account-bound call is
-authorized); hosted lifecycle qualification (Outcome 3); Codex local discovery (CLI not
-installed).
-
-Unrun:
-
-- a full `tests/unit` run and `make check` on the owner checkout after the 2026-10-09 wiring;
-- the full `tests/integration` tree after the wiring (the last full `tests/integration/postgres`
-  run, before wave 2, gave 172 passed and 1 failed, the same `agent-browser` case);
-- a real WSL or Linux worker, and Temporal Cloud;
-- multi-OS-process socket fanout, and an OS-process kill drill for the dispatch journal.
-
-### Release statement rules
-
-From [VALIDATION.md](specs/multi-provider-2026-10/VALIDATION.md): report each profile as
-implemented, offline-tested, DB/Temporal-tested, live-qualified and account/environment-qualified,
-with its blocked requirements. **A local baseline can ship while hosted work remains open; it must
-not be called "all providers complete".**
-
-Today the local `deep_agents` baseline is proven with deterministic cognition only and is not
-account-qualified. Cursor is unqualified. Claude Agent SDK and Codex have no integrated harness.
-`claude_cloud` and `codex_cloud` are Outcome 3, so MP-21 is blocked and all-provider completion
-stays open. No `qualified` flag and no ADR status changed.
-
-### Owner decisions still open
-
-1. `agent-browser` workspace pin: move the nested `agent-browser/agent-browser/` copy out (no
-   re-pin), or authorize a re-pin to `sha256:f65791f5...`.
-2. CRLF versus LF for `skills-lock.json` and the seeds.
-3. Release locks for `biotech` and `ai-engineer`, after accepting release 1.1.0 with 0031 and 0032.
-4. The production `mc.manifest_launch_bindings.v1` (18 `OWNER-SELECT:` pointers) and the
-   local-run profile's Temporal Cloud cluster.
-5. Exporting `OPENAI_API_KEY`, with a finite budget, for any real `deep_agents` run.
-6. A WSL or Linux worker for `cursor_local`, `claude_agent_sdk` and `codex`.
+Live drills with finite budgets (`make lane-qualify PROFILE=... LIVE=1`); a Linux/WSL 2 worker;
+the auth profiles document; removal of the stray nested `agent-browser/` folder; the CRLF lock
+decision; the release 1.2.0 lock, plan, apply and verify procedure; the production launch bindings
+file; Linear updates; acceptance of ADR-0035 to ADR-0041 and commit authorization. Exact steps are in
+the [release statement](qualification/release/multi-provider-2026-10.md#blocked-requirements-and-exact-owner-actions).
 
 ## Fast-track packet status (2026-10-08)
 

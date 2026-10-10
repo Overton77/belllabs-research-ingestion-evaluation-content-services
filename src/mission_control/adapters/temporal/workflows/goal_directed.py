@@ -117,6 +117,15 @@ VERIFIED_TERMINAL_OUTPUTS_PATCH = "rrm-019-verified-terminal-outputs"
 # once, so the operation boundary settles the claim instead of the run waiting on its
 # liability timer with no settler. Histories recorded before the patch keep the liability.
 SETTLE_SUPERSEDED_PATCH = "rrm-008-goal-settle-superseded-generation"
+# MP-12 (SPEC-01 "Temporal integration", ADR-0031/0039): Temporal Continue-As-New is the
+# fourth, independent progress mechanism. The family also rolls over when the server suggests
+# it (history length/size), and every rollover first drains the message handlers so a
+# `deliver_boundary_command` / `deliver_cancel` Update in flight is never cut off: pending
+# commands, applied ids, the paused state and the review state continue unchanged into the
+# next technical segment. A rollover never moves the goal iteration, the session generation
+# or the rollover count. Histories recorded before the patch replay their fixed-period
+# rollover without the drain, as they did.
+CONTINUE_AS_NEW_DRAIN_PATCH = "mp12-goal-drain-before-continue-as-new"
 STALE_RUN_VERSION = "stale_run_version"
 CANCELLING = "cancelling"
 POLICY_PAUSE_PREFIX = "goal-policy-pause:"
@@ -583,10 +592,10 @@ class GoalDirectedWorkflow:
                 if self._human_review_due(run_input, state):
                     state = await self._human_review(run_input, blueprint, state, timeout)
 
-                if (
-                    state.status == "ready"
-                    and state.next_goal_iteration % run_input.continue_as_new_iterations == 0
-                ):
+                if state.status == "ready" and self._rollover_due(run_input, state):
+                    if workflow.patched(CONTINUE_AS_NEW_DRAIN_PATCH):
+                        # Handlers mutate state only; none may be cut off by the rollover.
+                        await workflow.wait_condition(workflow.all_handlers_finished)
                     workflow.continue_as_new(
                         self._continuation_input(run_input, state, run_version, family_version)
                     )
@@ -750,6 +759,18 @@ class GoalDirectedWorkflow:
             return await self._cancellation_saga(
                 run_input, None, state, entered.run_version, timeout, digests
             )
+
+    # --- MP-12: Temporal Continue-As-New as its own mechanism ---------------------------------
+
+    @staticmethod
+    def _rollover_due(run_input: GoalDirectedRunInput, state: GoalDirectedExecutionState) -> bool:
+        """The fixed iteration period, or (patched) the server's suggestion."""
+
+        if state.next_goal_iteration % run_input.continue_as_new_iterations == 0:
+            return True
+        return workflow.patched(CONTINUE_AS_NEW_DRAIN_PATCH) and (
+            workflow.info().is_continue_as_new_suggested()
+        )
 
     # --- RRM-007 boundary mechanics ---------------------------------------------------------
 

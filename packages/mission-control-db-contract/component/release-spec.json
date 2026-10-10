@@ -1,6 +1,6 @@
 {
   "component": "mission_control",
-  "component_version": "1.1.0",
+  "component_version": "1.2.0",
   "installer_protocol": "mission-control-sql/v2",
   "owned_schemas": ["mission_control", "mission_control_search"],
   "postgres_major": 17,
@@ -19,7 +19,8 @@
     "mission_control_readonly"
   ],
   "compatible_previous_fingerprints": [
-    "sha256:ef5a9e71c9c4a4fe23f343a5708c476a757bc1c5a61f9aacae3a76577b209c09"
+    "sha256:ef5a9e71c9c4a4fe23f343a5708c476a757bc1c5a61f9aacae3a76577b209c09",
+    "sha256:7da7567a7e9c547015e9f9add3769720a42ad18b6c47e11017dcb416998989ac"
   ],
   "seed_compatibility": {
     "bundle_format": "mission-control-seed/v1",

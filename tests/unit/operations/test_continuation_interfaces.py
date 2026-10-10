@@ -197,7 +197,7 @@ async def test_request_continuation_rejections() -> None:
         await facade(None).command(run_id, _request(run_id, version), operator())
     assert no_session.value.code == "no_active_session"
     with pytest.raises(MissionControlRejected) as codex:
-        await facade(LocatedSession("a", "codex", "s")).command(
+        await facade(LocatedSession("a", "codex_cloud", "s")).command(
             run_id, _request(run_id, version), operator()
         )
     assert codex.value.code == "unsupported_control"

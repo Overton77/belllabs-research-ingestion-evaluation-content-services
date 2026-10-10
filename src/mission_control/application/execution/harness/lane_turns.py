@@ -27,6 +27,21 @@ sent again: found is observed, an authoritative `not_received` is sent once more
 same idempotency key, anything else parks `in_doubt`. Settlement asserts the owner first, so
 an owner fenced out by a takeover cannot settle. A segment that ends with the turn running
 retains the session in the manager; only settlement releases it.
+
+MP-12 (SPEC-01 "Four independent progress mechanisms", ADR-0039): a turn's terminal
+`finished` frame is the safe boundary. There the service measures context pressure from the
+occupancy the lane exposes (or reports it `unknown`), records the assessment as a
+non-closing frame, runs a *qualified* native compaction when the policy routes to it (and
+remeasures), and otherwise, when work continues under hard pressure or a
+`request_continuation` is pending, ends the segment without settling
+(`done=False` with the closing facts) so the operation workflow drives the persisted
+continuation phase machine through `continuation.advance`. While a transfer fences the
+harness execution no new create/send reaches the source session
+(`ContinuationInFlight`); after the activation the next `lane.turn` (`turn_no + 1`) sends
+the continuation turn to the recorded target session, journaled under its own key. A
+continuation handover whose dispatch the Stop Fence denies settles `cancelled` (nothing
+reached the target; the fence is the admitted immediate cancel); an *ambiguous* handover
+dispatch still parks `in_doubt` (the target may have accepted it).
 """
 
 from __future__ import annotations
@@ -37,9 +52,20 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import aclosing, suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 from uuid import UUID
 
+from mission_control.application.context.lane_continuation import (
+    LaneContinuationCoordinator,
+    continuation_instruction_ref,
+    is_continuation_instruction,
+)
+from mission_control.application.context.lane_support import (
+    CompactingLane,
+    CompactionRequest,
+    ContextOccupancyLane,
+    ContinuationInFlight,
+)
 from mission_control.application.execution.harness.controls import (
     SessionHandover,
     SessionHandoverLane,
@@ -88,6 +114,13 @@ from mission_control.application.frames.sink import FrameReader, FrameStore, har
 from mission_control.application.frames.writer import FrameWriter
 from mission_control.contracts.identities import parse_request_scope
 from mission_control.domain.authoring.contracts import SecretRef
+from mission_control.domain.context.checkpoint import ContinuationTriggerKind
+from mission_control.domain.context.pressure import (
+    ContextOccupancy,
+    PressureAssessment,
+    compaction_route,
+    native_unavailable_reason,
+)
 from mission_control.domain.execution.checkpoint_lineage import OperationActivityAttempt
 from mission_control.domain.execution.contracts import (
     OperationExecutionRequest,
@@ -104,6 +137,7 @@ from mission_control.domain.execution.lane_turns import (
     NativeRefs,
 )
 from mission_control.domain.execution.lanes import (
+    PLACEMENT_OF_PROFILE,
     CancelReceipt,
     CancelTurnRequest,
     EndSessionRequest,
@@ -137,6 +171,10 @@ _LOGGER = logging.getLogger(__name__)
 # acknowledgement is journaled before the cancel proceeds (the call itself is never retried).
 DISPATCH_RECEIPT_GRACE_S = 10.0
 LANE_ACTOR = "mission-control-lane-turn"
+MC_AFTER_COMPACTION_RAW_KIND = "custom.mc.after_compaction"
+
+# Typed lane-state columns (`LaneExecutionUpdate`). The Claude lane records its state root
+# under `bridge_state_root`; its SDK pin and auth route live in its describe and frames.
 _RECORDED_DETAILS = frozenset(
     {"cursor_sdk_version", "bridge_state_root", "cloud_branch", "cloud_agent_url"}
 )
@@ -151,7 +189,10 @@ class LaneBoundary(Protocol):
     """What `lane.turn` needs from the governed operation boundary."""
 
     async def admit_lane_session(
-        self, request: OperationExecutionRequest
+        self,
+        request: OperationExecutionRequest,
+        *,
+        attempt: OperationActivityAttempt | None = None,
     ) -> LaneSessionAdmissionView: ...
 
     async def settle_lane_session(
@@ -162,6 +203,7 @@ class LaneBoundary(Protocol):
         attempt: OperationActivityAttempt | None = None,
         native_turn_ref: str | None = None,
         cancelled_by_command: bool = False,
+        final_text: str | None = None,
     ) -> OperationExecutionResult: ...
 
     async def lane_settlement(
@@ -171,6 +213,28 @@ class LaneBoundary(Protocol):
     async def lane_in_doubt(
         self, request: OperationExecutionRequest, *, reason: str
     ) -> OperationExecutionResult: ...
+
+
+@runtime_checkable
+class FinalTextLane(Protocol):
+    """MP-20: a Session Lane that reads its turn's *full* final assistant text from the
+    terminal frame body (the closing facts carry only a bounded excerpt). The settlement
+    parses the Completion Candidate from it; a lane without it falls back to the closing
+    facts' text only when that text provably is whole (`operation_execution.lane_final_text`)."""
+
+    def final_text(self, turn: TurnHandle, frame: LaneFrame) -> str | None: ...
+
+
+def read_final_text(harness: SessionLane, turn: TurnHandle, frame: LaneFrame) -> str | None:
+    """The lane's full final text of `turn` from its terminal `frame`, if the lane reads it."""
+
+    if not isinstance(harness, FinalTextLane):
+        return None
+    try:
+        return harness.final_text(turn, frame)
+    except Exception:
+        _LOGGER.warning("the lane's final text was not read; the closing facts decide")
+        return None
 
 
 class SecretValues(Protocol):
@@ -261,7 +325,7 @@ def execution_start(
 ) -> HarnessExecutionStart:
     """The harness execution a Session Lane's frames (provider and hook) are written under."""
 
-    placement = "cloud" if identity.lane_profile == "cursor_cloud" else "worker_hosted"
+    placement = PLACEMENT_OF_PROFILE.get(identity.lane_profile, "worker_hosted")
     return HarnessExecutionStart(
         harness_execution_id=identity.harness_execution_id,
         request_scope=identity.request_scope,
@@ -300,6 +364,7 @@ class LaneTurnService:
         sessions: WorkerSessionManager | None = None,
         fences: StopFenceRepository | None = None,
         receipt_grace_s: float = DISPATCH_RECEIPT_GRACE_S,
+        continuations: LaneContinuationCoordinator | None = None,
     ) -> None:
         # MP-06: the worker-owned session manager (fenced ownership, retained sessions), the
         # Stop Fence every new native dispatch is admitted against, and the bounded grace a
@@ -308,6 +373,9 @@ class LaneTurnService:
         self._sessions = sessions or WorkerSessionManager()
         self._fences = fences
         self._receipt_grace_s = receipt_grace_s
+        # MP-12: context pressure, continuation triggers, the in-flight fence and the
+        # activated target of a continuation (none composed: the FT-G4 handover path only).
+        self._continuations = continuations
         # FT-G4: the mailbox consumes queued content at the send that carries it
         # (`wait_then_send`) and settles it with the turn; `injections` watches a running
         # turn for `interrupt_and_inject` (`cancel_and_replace`); the frame reader names the
@@ -394,7 +462,7 @@ class LaneTurnService:
     ) -> LaneTurnResult:
         operation = request.operation
         harness = self._session_lane(request.lane_profile, operation, request.generation)
-        admission = await self._boundary.admit_lane_session(operation)
+        admission = await self._boundary.admit_lane_session(operation, attempt=attempt)
         if admission.settled is not None:
             return LaneTurnResult(
                 done=True,
@@ -421,10 +489,29 @@ class LaneTurnService:
         )
         fields = self._fields(operation, identity, request.generation, f"turn:{request.turn_no}")
         state = await self._acknowledged_turn(
-            identity, fields, await self._states.load(scope, heid)
+            identity, fields, await self._states.load(scope, heid), turn_no=request.turn_no
         )
-        sent = state is not None and state.native_turn_ref is not None
-        journaled = state is not None and state.dispatch("send", fields["idempotency_key"])
+        record = state.dispatch("send", fields["idempotency_key"]) if state is not None else None
+        if request.turn_no > 1:
+            # MP-12: a later turn (the continuation turn) is "sent" only by its own journal
+            # entry; the row's native turn is the latest turn, whichever number it carries.
+            sent = (
+                record is not None
+                and record.phase == "acknowledged"
+                and state is not None
+                and state.native_turn_ref == record.native_ref
+            )
+        else:
+            sent = state is not None and state.native_turn_ref is not None
+        journaled = record is not None
+        if self._continuations is not None and not sent:
+            # MP-12: a session frozen for a continuation takes no new agent action.
+            fencing = await self._continuations.fencing(
+                scope, identity.run_key, harness_execution_id=str(heid)
+            )
+            if fencing is not None:
+                raise ContinuationInFlight(fencing.transfer_id, fencing.phase.value)
+            request = await self._continuation_instruction(request, harness, identity, state)
         if request.capacity_exhausted:
             if not sent:
                 await self._turn_not_started(operation)
@@ -456,6 +543,14 @@ class LaneTurnService:
         else:
             if state is None or state.native_session_ref is None:
                 return await self._lost(request, identity, reason="native_session_unrecorded")
+            if self._continuations is not None and request.phase == "resume":
+                # MP-12: a continuation that ended without a target leaves a finished turn
+                # whose terminal frame is persisted; the resumed segment settles it.
+                settled = await self._settle_after_continuation(
+                    request, harness, identity, fields, state, owner, attempt=attempt
+                )
+                if settled is not None:
+                    return settled
             try:
                 session = await harness.reattach(
                     ReattachRequest(
@@ -499,20 +594,63 @@ class LaneTurnService:
         identity: LaneExecutionIdentity,
         fields: dict[str, Any],
         state: LaneExecutionState | None,
+        *,
+        turn_no: int = 1,
     ) -> LaneExecutionState | None:
         """A send acknowledged in the journal but not yet on the row (lost between the two
-        writes) is recorded now: the journal is the receipt."""
+        writes) is recorded now: the journal is the receipt. MP-12: a later turn's receipt
+        supersedes the earlier turn's identity explicitly."""
 
-        if state is None or state.native_turn_ref is not None:
+        if state is None:
             return state
         record = state.dispatch("send", fields["idempotency_key"])
         if record is None or record.phase != "acknowledged" or record.native_ref is None:
             return state
+        if state.native_turn_ref == record.native_ref:
+            return state
+        if state.native_turn_ref is not None and turn_no <= 1:
+            return state
         return await self._states.record(
             identity.request_scope,
             identity.harness_execution_id,
-            LaneExecutionUpdate(native_turn_ref=record.native_ref),
+            LaneExecutionUpdate(
+                native_turn_ref=record.native_ref, supersedes_turn_ref=state.native_turn_ref
+            ),
         )
+
+    async def _continuation_instruction(
+        self,
+        request: LaneTurnRequest,
+        harness: SessionLane,
+        identity: LaneExecutionIdentity,
+        state: LaneExecutionState | None,
+    ) -> LaneTurnRequest:
+        """MP-12: the first turn of an activated target carries the continuation instruction
+        (the sealed packet's `admitted_input`), staged on the lane when it sends text by
+        reference; a workflow that lost the reference across continue-as-new still finds it
+        here, from the activated transfer that names this turn."""
+
+        assert self._continuations is not None
+        if request.turn_no <= 1 or state is None:
+            return request
+        activated = await self._continuations.activated_for_turn(
+            identity.request_scope,
+            identity.run_key,
+            harness_execution_id=str(identity.harness_execution_id),
+            turn_no=request.turn_no,
+        )
+        if activated is None:
+            if is_continuation_instruction(request.instruction_ref):
+                raise NativeTurnLost(
+                    f"turn {request.turn_no} names a continuation that is not activated"
+                )
+            return request
+        ref = continuation_instruction_ref(activated.transfer_id)
+        if isinstance(harness, TurnTextStaging):
+            prompt = await self._continuations.hydration_prompt(activated)
+            if prompt is not None:
+                harness.stage_turn(str(identity.harness_execution_id), ref, prompt)
+        return request.model_copy(update={"instruction_ref": ref})
 
     async def _start_and_send(
         self,
@@ -602,9 +740,17 @@ class LaneTurnService:
             )
         if turn.native_turn_ref is None:
             raise ValueError("a Session Lane send returns the native turn identity")
-        await self._states.record(
-            scope, heid, LaneExecutionUpdate(native_turn_ref=turn.native_turn_ref)
-        )
+        update = LaneExecutionUpdate(native_turn_ref=turn.native_turn_ref)
+        if (
+            request.turn_no > 1
+            and state is not None
+            and state.native_turn_ref not in {None, turn.native_turn_ref}
+        ):
+            # MP-12: the continuation turn supersedes the frozen source turn explicitly.
+            update = LaneExecutionUpdate(
+                native_turn_ref=turn.native_turn_ref, supersedes_turn_ref=state.native_turn_ref
+            )
+        await self._states.record(scope, heid, update)
         await self._turn_started(operation, harness, session, turn)
         return session, turn, dispatched.reconciled
 
@@ -954,6 +1100,7 @@ class LaneTurnService:
             duplicates=progress.duplicates,
             handle=writer.handle,
             owner=progress.owner,
+            final_text=read_final_text(harness, turn, terminal),
         )
 
     async def _renew(
@@ -1442,13 +1589,423 @@ class LaneTurnService:
                     progress,
                     cancel_first=False,
                 )
-        if facts.native_status != "finished" or not isinstance(harness, SessionHandoverLane):
+        if facts.native_status != "finished":
             return None
-        handover = await harness.pending_handover(fields["harness_execution_id"])
-        if handover is None:
+        if isinstance(harness, SessionHandoverLane):
+            handover = await harness.pending_handover(fields["harness_execution_id"])
+            if handover is not None:
+                return await self._hand_over(
+                    request, harness, identity, fields, turn, handover, writer, progress
+                )
+        if self._continuations is None:
             return None
-        return await self._hand_over(
-            request, harness, identity, fields, turn, handover, writer, progress
+        return await self._continuation_boundary(
+            request, harness, identity, turn, facts, writer, signals, progress
+        )
+
+    # --- MP-12: the safe boundary (context pressure, native compaction, continuation) --------
+
+    async def _continuation_boundary(
+        self,
+        request: LaneTurnRequest,
+        harness: SessionLane,
+        identity: LaneExecutionIdentity,
+        turn: TurnHandle,
+        facts: ClosingFacts,
+        writer: FrameWriter,
+        signals: TurnSignals,
+        progress: _SegmentProgress,
+    ) -> LaneTurnResult | None:
+        """At a turn's `finished` frame: measure pressure, compact natively where qualified,
+        and when the session must continue in a fresh generation end the segment without
+        settling (the workflow drives the phase machine). `None` settles as before."""
+
+        assert self._continuations is not None
+        coordinator = self._continuations
+        operation = request.operation
+        scope, heid = identity.request_scope, identity.harness_execution_id
+        session_ref = turn.session.native_session_ref or str(heid)
+        describe = harness.describe()
+        assessment = await self._observe_pressure(
+            harness, identity, turn, writer, signals, progress, turns_in_session=request.turn_no
+        )
+        pending = await coordinator.pending(scope, identity.run_key, source_session_ref=session_ref)
+        continues = bool(facts.missing_outputs)
+        can_compact = isinstance(harness, CompactingLane)
+        route = (
+            compaction_route(
+                coordinator.policy,
+                assessment,
+                compaction_control=describe.compaction_control,
+                lane_can_compact=can_compact,
+            )
+            if continues
+            else "none"
+        )
+        if route == "native":
+            after = await self._native_compaction(
+                harness, identity, turn, writer, signals, progress, assessment
+            )
+            route = "none"
+            if after is None:
+                route = coordinator.policy.fallback
+            elif after.level == "hard":
+                route = coordinator.policy.fallback
+                assessment = after
+        elif continues and assessment.level != "none" and route != "none":
+            await self._pressure_note(
+                identity,
+                turn,
+                writer,
+                signals,
+                progress,
+                "native_compaction_unavailable",
+                native_unavailable_reason(describe.compaction_control, can_compact),
+            )
+        if route == "fail":
+            # The policy requires a native compaction the lane cannot provide: recorded,
+            # and the unit settles on its own completion evaluation (nothing is invented).
+            await self._pressure_note(
+                identity,
+                turn,
+                writer,
+                signals,
+                progress,
+                "native_compaction_required",
+                (
+                    "policy requires native compaction; "
+                    + native_unavailable_reason(describe.compaction_control, can_compact)
+                ),
+            )
+            route = "none"
+        if pending is None and route == "sealed_checkpoint":
+            kind = (
+                ContinuationTriggerKind.CONTEXT_HEALTH_HARD
+                if assessment.level == "hard"
+                else ContinuationTriggerKind.CONTEXT_HEALTH_SOFT
+            )
+            pending = await coordinator.request(
+                kind,
+                f"pressure://{heid}/{turn.native_turn_ref or turn.turn_no}/{request.turn_no}",
+                request_scope=scope,
+                run_key=identity.run_key,
+                activation_key=identity.activation_key,
+                logical_execution_id=identity.activation_key,
+                lane_profile=identity.lane_profile,
+                source_session_ref=session_ref,
+            )
+        if pending is None:
+            return None
+        # The safe boundary of a continuation: the turn finished, the operation did not.
+        now = self._clock()
+        await self._states.assert_owner(scope, heid, progress.owner)
+        await self._states.record(scope, heid, segment_update(progress.cursor, now))
+        await self._project(writer.handle, identity)
+        self._sessions.retain(scope, heid, progress.owner, session=turn.session, turn=turn)
+        _LOGGER.info(
+            "operation %s reached a continuation boundary (transfer %s, trigger %s)",
+            operation.identity.semantic_key,
+            pending.transfer_id,
+            pending.trigger.kind.value,
+        )
+        return LaneTurnResult(
+            done=False,
+            cursor=progress.cursor,
+            segment_no=request.segment_no,
+            frames_persisted=progress.persisted,
+            frames_duplicate=progress.duplicates,
+            native=NativeRefs(
+                session_ref=turn.session.native_session_ref, turn_ref=turn.native_turn_ref
+            ),
+            closing_facts=facts,
+            usage_estimate=facts.usage,
+        )
+
+    async def _observe_pressure(
+        self,
+        harness: SessionLane,
+        identity: LaneExecutionIdentity,
+        turn: TurnHandle,
+        writer: FrameWriter,
+        signals: TurnSignals,
+        progress: _SegmentProgress,
+        *,
+        turns_in_session: int,
+        label: str = "pressure",
+    ) -> PressureAssessment:
+        """The lane's occupancy (or `unknown`) through the policy, persisted as a frame."""
+
+        assert self._continuations is not None
+        occupancy: ContextOccupancy | None = None
+        if isinstance(harness, ContextOccupancyLane):
+            occupancy = await harness.context_occupancy(
+                str(identity.harness_execution_id), turn.session, turn
+            )
+        if occupancy is None:
+            occupancy = ContextOccupancy.unknown("the lane exposes no context occupancy")
+        assessment = self._continuations.assess(occupancy, turns_in_session=turns_in_session)
+        await self._write_frame(
+            identity,
+            turn,
+            writer,
+            signals,
+            progress,
+            provider_key=f"mc:{label}:{identity.harness_execution_id}:{turn.native_turn_ref}:{turns_in_session}",
+            raw_kind="mc.context_pressure",
+            kind=FrameKind.STATUS,
+            body={**assessment.observation(), "occupancy_source": occupancy.source},
+        )
+        return assessment
+
+    async def _native_compaction(
+        self,
+        harness: SessionLane,
+        identity: LaneExecutionIdentity,
+        turn: TurnHandle,
+        writer: FrameWriter,
+        signals: TurnSignals,
+        progress: _SegmentProgress,
+        assessment: PressureAssessment,
+    ) -> PressureAssessment | None:
+        """The lane's explicit compaction, serialized at the turn boundary: intent, start and
+        completion are frames; the epoch advances only on completion and nothing else moves
+        (no iteration, no budget, no retry counter). `None` means it failed."""
+
+        assert isinstance(harness, CompactingLane)
+        frames = await self._frames_of(identity, turn.session.generation)
+        # A compaction Mission Control requested is observed twice when the provider also
+        # emits its own completion (Codex `thread/compacted`); a provider-automatic one only
+        # natively. Each count alone never double-counts, so the epoch follows the larger.
+        ours = sum(
+            1
+            for frame in frames
+            if frame.kind == FrameKind.AFTER_COMPACTION
+            and frame.raw_kind == MC_AFTER_COMPACTION_RAW_KIND
+        )
+        native = sum(
+            1
+            for frame in frames
+            if frame.kind == FrameKind.AFTER_COMPACTION
+            and frame.raw_kind != MC_AFTER_COMPACTION_RAW_KIND
+        )
+        epoch = 1 + max(ours, native)
+        heid = str(identity.harness_execution_id)
+        await self._write_frame(
+            identity,
+            turn,
+            writer,
+            signals,
+            progress,
+            provider_key=f"mc:compaction:{heid}:{epoch}:before",
+            raw_kind="custom.mc.before_compaction",
+            kind=FrameKind.BEFORE_COMPACTION,
+            body={"epoch": epoch, "trigger": "explicit", "reason": assessment.reason},
+        )
+        try:
+            receipt = await harness.compact(
+                CompactionRequest(
+                    harness_execution_id=heid,
+                    session=turn.session,
+                    turn=turn,
+                    epoch=epoch,
+                    reason=f"context_pressure_{assessment.level}",
+                )
+            )
+        except Exception as error:
+            _LOGGER.warning("native compaction failed on %s: %s", identity.lane_profile, error)
+            await self._pressure_note(
+                identity, turn, writer, signals, progress, "native_compaction_failed", str(error)
+            )
+            return None
+        if not receipt.completed:
+            await self._pressure_note(
+                identity,
+                turn,
+                writer,
+                signals,
+                progress,
+                "native_compaction_failed",
+                receipt.detail or "the provider did not complete the compaction",
+            )
+            return None
+        await self._write_frame(
+            identity,
+            turn,
+            writer,
+            signals,
+            progress,
+            provider_key=f"mc:compaction:{heid}:{epoch}:after",
+            raw_kind=MC_AFTER_COMPACTION_RAW_KIND,
+            kind=FrameKind.AFTER_COMPACTION,
+            body={
+                "epoch": epoch,
+                "cutoff_index": f"explicit:{epoch}",
+                "summary_digest": receipt.summary_digest,
+                "native_ref": receipt.native_ref,
+            },
+        )
+        if receipt.occupancy_after is not None:
+            assert self._continuations is not None
+            after = self._continuations.assess(
+                receipt.occupancy_after, turns_in_session=assessment.turns_in_session
+            )
+            await self._write_frame(
+                identity,
+                turn,
+                writer,
+                signals,
+                progress,
+                provider_key=f"mc:remeasure:{heid}:{epoch}",
+                raw_kind="mc.context_pressure",
+                kind=FrameKind.STATUS,
+                body={**after.observation(), "occupancy_source": receipt.occupancy_after.source},
+            )
+            return after
+        return await self._observe_pressure(
+            harness,
+            identity,
+            turn,
+            writer,
+            signals,
+            progress,
+            turns_in_session=assessment.turns_in_session,
+            label=f"remeasure:{epoch}",
+        )
+
+    async def _pressure_note(
+        self,
+        identity: LaneExecutionIdentity,
+        turn: TurnHandle,
+        writer: FrameWriter,
+        signals: TurnSignals,
+        progress: _SegmentProgress,
+        event: str,
+        detail: str,
+    ) -> None:
+        await self._write_frame(
+            identity,
+            turn,
+            writer,
+            signals,
+            progress,
+            provider_key=f"mc:{event}:{identity.harness_execution_id}:{turn.native_turn_ref}",
+            raw_kind=f"mc.{event}",
+            kind=FrameKind.STATUS,
+            body={"event": event, "detail": detail[:1_024]},
+        )
+
+    async def _write_frame(
+        self,
+        identity: LaneExecutionIdentity,
+        turn: TurnHandle,
+        writer: FrameWriter,
+        signals: TurnSignals,
+        progress: _SegmentProgress,
+        *,
+        provider_key: str,
+        raw_kind: str,
+        kind: FrameKind,
+        body: dict[str, Any],
+    ) -> None:
+        del identity
+        receipt = await writer.write(
+            [
+                FrameObservation(
+                    provider_key=provider_key[:512],
+                    raw_kind=raw_kind,
+                    kind=kind,
+                    body=body,
+                    native_turn_ref=turn.native_turn_ref,
+                    native_session_ref=turn.session.native_session_ref,
+                )
+            ]
+        )
+        progress.persisted += receipt.new
+        progress.duplicates += receipt.duplicate
+        signals.heartbeat(progress.cursor, progress.persisted)
+
+    async def _settle_after_continuation(
+        self,
+        request: LaneTurnRequest,
+        harness: SessionLane,
+        identity: LaneExecutionIdentity,
+        fields: dict[str, Any],
+        state: LaneExecutionState,
+        owner: SessionOwner,
+        *,
+        attempt: OperationActivityAttempt | None,
+    ) -> LaneTurnResult | None:
+        """A continuation that ended without activating (failed, exhausted, human review)
+        leaves the source turn finished at its boundary: settle it from the persisted terminal
+        frame instead of observing a stream that has nothing left."""
+
+        assert self._continuations is not None
+        scope, heid = identity.request_scope, identity.harness_execution_id
+        latest = await self._continuations.latest_for_execution(
+            scope, identity.run_key, harness_execution_id=str(heid)
+        )
+        if latest is None or not latest.ended or latest.activated:
+            return None
+        if state.native_session_ref is None or state.native_turn_ref is None:
+            return None
+        terminal = next(
+            (
+                frame
+                for frame in reversed(await self._frames_of(identity, request.generation))
+                if frame.kind == FrameKind.RUN_RESULT
+                and frame.native_turn_ref == state.native_turn_ref
+            ),
+            None,
+        )
+        if terminal is None:
+            return None
+        from mission_control.domain.frames.body import frame_body_object
+
+        session = SessionHandle(
+            lane_profile=request.lane_profile,
+            harness_execution_id=str(heid),
+            generation=request.generation,
+            native_session_ref=state.native_session_ref,
+        )
+        turn = TurnHandle(
+            session=session, turn_no=request.turn_no, native_turn_ref=state.native_turn_ref
+        )
+        frame = LaneFrame(
+            harness_execution_id=str(heid),
+            generation=request.generation,
+            provider_key=terminal.provider_key,
+            cursor=harness.resume_cursor(terminal.provider_key) or terminal.provider_key,
+            kind=terminal.raw_kind,
+            raw_kind=terminal.raw_kind,
+            terminal=True,
+            digest=terminal.body_digest,
+            body=frame_body_object(terminal.body_excerpt, terminal.body_bytes),
+            native_turn_ref=terminal.native_turn_ref,
+            tool_call_ref=terminal.tool_call_ref,
+        )
+        facts = harness.closing_facts(turn, frame)
+        handle = await self._open(
+            request.operation, identity, request.generation, state.native_session_ref
+        )
+        _LOGGER.info(
+            "continuation %s ended %s without a target; settling the source turn",
+            latest.transfer_id,
+            latest.status.value,
+        )
+        return await self._settle(
+            request,
+            harness,
+            identity,
+            turn,
+            facts,
+            attempt=attempt,
+            native=NativeRefs(session_ref=state.native_session_ref, turn_ref=state.native_turn_ref),
+            cursor=state.provider_cursor,
+            handle=handle,
+            owner=owner,
+            # The persisted body is whole only when it fit its excerpt; otherwise no final
+            # text is read and an over-cap candidate fails closed.
+            final_text=read_final_text(harness, turn, frame),
         )
 
     async def _hand_over(
@@ -1461,10 +2018,15 @@ class LaneTurnService:
         handover: SessionHandover,
         writer: FrameWriter,
         progress: _SegmentProgress,
-    ) -> TurnHandle:
+    ) -> TurnHandle | LaneTurnResult:
         """SPEC-07 section 7 `request_continuation` (emulated): the next turn runs the fresh
         agent a sealed Continuation Checkpoint hydrated; the native session moves by an
-        explicit supersession and the new session's `session_init` frame confirms it."""
+        explicit supersession and the new session's `session_init` frame confirms it.
+
+        MP-12 decision on the MP-06 open item: a handover dispatch the Stop Fence denies
+        settles the unit `cancelled` (the fence is the admitted immediate cancel; nothing
+        reached the target; the source turn is already terminal); an *ambiguous* handover
+        dispatch parks `in_doubt` as before (the target may have accepted the turn)."""
 
         assert isinstance(harness, SessionHandoverLane)
         new_session = handover.session
@@ -1506,8 +2068,12 @@ class LaneTurnService:
                     ),
                 )
             ).handle
-        except (_DispatchParked, DispatchFenced) as stopped:
-            raise NativeTurnLost(f"the continuation turn was not dispatched: {stopped}") from None
+        except _DispatchParked as parked:
+            raise NativeTurnLost(
+                f"the continuation turn was not dispatched: {parked.reason}"
+            ) from None
+        except DispatchFenced:
+            return await self._fenced_handover(request, harness, identity, turn, writer, progress)
         if sent.native_turn_ref is None:
             raise NativeTurnLost("the continuation turn was not accepted")
         await self._states.record(
@@ -1523,6 +2089,40 @@ class LaneTurnService:
         await harness.complete_handover(fields["harness_execution_id"], handover.transfer_id)
         progress.cursor = None
         return sent
+
+    async def _fenced_handover(
+        self,
+        request: LaneTurnRequest,
+        harness: SessionLane,
+        identity: LaneExecutionIdentity,
+        turn: TurnHandle,
+        writer: FrameWriter,
+        progress: _SegmentProgress,
+    ) -> LaneTurnResult:
+        """The Stop Fence denied the continuation handover: the source turn is terminal, the
+        target received nothing, the unit settles `cancelled` by the fencing command."""
+
+        return await self._settle(
+            request,
+            harness,
+            identity,
+            turn,
+            ClosingFacts(
+                native_status="cancelled",
+                error_code="cancelled_by_command",
+                usage=await self._turn_usage(identity, request.generation, turn.native_turn_ref),
+            ),
+            attempt=None,
+            native=NativeRefs(
+                session_ref=turn.session.native_session_ref, turn_ref=turn.native_turn_ref
+            ),
+            cursor=progress.cursor,
+            persisted=progress.persisted,
+            duplicates=progress.duplicates,
+            handle=writer.handle,
+            cancelled_by_command=True,
+            owner=progress.owner,
+        )
 
     # --- FT-G4 wait_then_send: the mailbox at the send that carries it -------------------------
 
@@ -1607,6 +2207,7 @@ class LaneTurnService:
             tool_call_ref=frame.tool_call_ref,
             provider_timestamp=frame.provider_timestamp,
             native_session_ref=session_ref,
+            subordinate_ref=frame.subordinate_ref,
         )
 
     async def _settle(
@@ -1625,6 +2226,7 @@ class LaneTurnService:
         handle: HarnessExecutionHandle | None = None,
         cancelled_by_command: bool = False,
         owner: SessionOwner | None = None,
+        final_text: str | None = None,
     ) -> LaneTurnResult:
         operation = request.operation
         scope, heid = identity.request_scope, identity.harness_execution_id
@@ -1641,6 +2243,7 @@ class LaneTurnService:
             attempt=attempt,
             native_turn_ref=native.turn_ref,
             cancelled_by_command=cancelled_by_command,
+            final_text=final_text,
         )
         await self._states.record(
             scope, heid, LaneExecutionUpdate(usage_disposition=facts.cost_disposition)
@@ -2031,6 +2634,7 @@ async def _heartbeat_ticker(
 
 
 __all__ = [
+    "FinalTextLane",
     "LaneBoundary",
     "LaneExecutionIdentity",
     "LaneNotSessionDriven",
@@ -2038,4 +2642,5 @@ __all__ = [
     "TurnSignals",
     "execution_start",
     "harness_scope",
+    "read_final_text",
 ]

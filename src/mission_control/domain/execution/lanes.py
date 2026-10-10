@@ -576,6 +576,9 @@ class LaneFrame(LaneContract):
     native_turn_ref: str | None = Field(default=None, min_length=1, max_length=1_024)
     tool_call_ref: str | None = Field(default=None, min_length=1, max_length=1_024)
     provider_timestamp: AwareDatetime | None = None
+    # MP-13/MP-07: the provider subordinate (subagent/task) this frame belongs to, by its
+    # stable native identity; absent for the parent session's own frames.
+    subordinate_ref: str | None = Field(default=None, min_length=1, max_length=1_024)
 
 
 class SnapshotRequest(HarnessRequest):

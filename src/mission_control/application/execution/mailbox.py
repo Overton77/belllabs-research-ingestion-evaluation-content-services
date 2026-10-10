@@ -77,6 +77,25 @@ class MailboxContentRejected(ValueError):
         self.code = code
 
 
+class MailboxHeld(RuntimeError):
+    """`continuation_holding`: a continuation of this run is between `frozen` and
+    `activated`, so no boundary delivers queued commands until the target is activated
+    (workflow-types/08 section 9: held commands reach only a confirmed target)."""
+
+    code = "continuation_holding"
+
+    def __init__(self, run_id: str, transfer_id: str) -> None:
+        super().__init__(f"run {run_id} holds its mailbox for continuation {transfer_id}")
+        self.run_id = run_id
+        self.transfer_id = transfer_id
+
+
+class HeldCommandsPort(Protocol):
+    """MP-12: the continuation ledger's answer to "is this run's mailbox held right now?"."""
+
+    async def open_hold(self, request_scope: str, run_id: str) -> str | None: ...
+
+
 def mailbox_command_action(
     kind: str,
     content: ContentRef | InlineText,
@@ -439,6 +458,7 @@ class MailboxDeliveryService:
         describe: Callable[[str], LaneDescribe | None] | None = None,
         clock: Clock = lambda: datetime.now(UTC),
         reuse: ReusedUnitOracle | None = None,
+        holds: HeldCommandsPort | None = None,
     ) -> None:
         self._mailbox = mailbox
         self._receipts = receipts
@@ -446,6 +466,8 @@ class MailboxDeliveryService:
         self._clock = clock
         # A unit a fork reuses runs no turn: it must not take queued content.
         self._reuse = reuse
+        # MP-12: while a continuation holds the run's commands, no boundary delivers.
+        self._holds = holds
 
     @property
     def mailbox(self) -> CommandMailboxRepository:
@@ -489,6 +511,12 @@ class MailboxDeliveryService:
             and await self._reuse.reused(request_scope, run_id, unit_key)
         ):
             return ()
+        if self._holds is not None:
+            holding = await self._holds.open_hold(request_scope, run_id)
+            if holding is not None:
+                # Nothing is claimed: a claim would seal the held entries into a packet of
+                # the frozen source. The boundary retries once the target is activated.
+                raise MailboxHeld(run_id, holding)
         projection = await self._receipts.get_run(request_scope, run_id)
         point = MailboxBoundaryPoint(
             family=family,
@@ -909,6 +937,42 @@ class MailboxDeliveryService:
         )
 
 
+class ContinuationMailboxHolds:
+    """MP-12: the `MailboxHoldPort` over the durable mailbox.
+
+    `hold` names every entry still `queued` for the run at the freeze; the ids travel on the
+    transfer row and in the checkpoint's `queued_commands`. The entries themselves stay
+    `queued` (never consumed, never moved): while the transfer fences the run the delivery
+    service refuses every boundary claim (`MailboxHeld`), so a target that fails hydration
+    or verification leaves them exactly where they were and the next transfer holds them
+    again. `release` records nothing: once the fence lifts the next boundary claims them in
+    admission order, after the activated target's first turn.
+    """
+
+    def __init__(self, mailbox: CommandMailboxRepository) -> None:
+        self._mailbox = mailbox
+
+    async def hold(self, request_scope: str, run_key: str, transfer_id: str) -> tuple[str, ...]:
+        del transfer_id
+        return tuple(
+            dict.fromkeys(
+                entry.command_id
+                for entry in await self._mailbox.list_entries(request_scope, run_key)
+                if entry.pending
+            )
+        )
+
+    async def release(
+        self, request_scope: str, run_key: str, transfer_id: str, command_ids: Sequence[str]
+    ) -> None:
+        del request_scope, run_key, transfer_id, command_ids
+
+    async def still_pending(self, request_scope: str, run_key: str) -> tuple[str, ...]:
+        """The held entries as the ledger sees them now (diagnostics and proofs)."""
+
+        return await self.hold(request_scope, run_key, "diagnostic")
+
+
 def queued_event(entry: MailboxEntry) -> DomainEventEnvelope:
     """`command.queued`, appended by run control with the mailbox entry it admits."""
 
@@ -952,9 +1016,12 @@ __all__ = [
     "MAILBOX_RECORDER",
     "BoundaryReceiptLedger",
     "CommandMailboxRepository",
+    "ContinuationMailboxHolds",
     "ExpiredReason",
+    "HeldCommandsPort",
     "InMemoryCommandMailbox",
     "MailboxClaim",
     "MailboxDeliveryService",
+    "MailboxHeld",
     "queued_event",
 ]

@@ -161,7 +161,7 @@ class _NameRecorder:
         return name
 
 
-def workflow_parity() -> dict[str, Any]:
+def workflow_parity(asset_version: str = "1") -> dict[str, Any]:
     from mission_control.adapters.temporal.registration.activities import coordinator_activities
     from mission_control.adapters.temporal.registration.workflows import coordinator_workflows
 
@@ -183,12 +183,12 @@ def workflow_parity() -> dict[str, Any]:
             "temporal_activities": sorted(coordinator_activities(family, _NameRecorder())),
             "source_refs": sources,
         }
-        key = f"workflow-family:{slug}/1"
+        key = f"workflow-family:{slug}/{asset_version}"
         records.append(
             _asset(
                 key,
                 asset_id=f"workflow-family:{slug}",
-                version="1",
+                version=asset_version,
                 kind="policy",
                 contract="mission-control.workflow-family/1",
                 manifest_ref=f"repo://src/mission_control/adapters/temporal/registration#{family}",
@@ -209,6 +209,30 @@ def workflow_parity() -> dict[str, Any]:
             "(those are application-owned), no missions or runs."
         ),
         "records": records,
+    }
+
+
+WORKFLOW_PARITY_FROZEN = "common/mc.catalog.workflow-parity-1.0.0.json"
+
+
+def workflow_parity_successor() -> dict[str, Any]:
+    """`mc.catalog.workflow-parity@1.0.1`: the families as registered today (MP-10 added
+    `HumanGateWorkflow` to both), under new asset versions `workflow-family:<slug>/2`.
+
+    1.0.0 is a dependency of the applied approved-assets 1.0.0 seed, so its records are
+    frozen; the successor never rewrites a logical key 1.0.0 holds.
+    """
+
+    current = workflow_parity(asset_version="2")
+    return {
+        **current,
+        "seed_version": "1.0.1",
+        "depends_on": [{"seed_key": "mc.catalog.workflow-parity", "seed_version": "1.0.0"}],
+        "description": (
+            "Successor of mc.catalog.workflow-parity@1.0.0 (frozen): the StageGraph and "
+            "GoalDirected families as the worker registers them now (with the Human Gate "
+            "workflow), as asset version 2. No product Workflow Types, missions or runs."
+        ),
     }
 
 
@@ -330,6 +354,11 @@ def approved_assets() -> dict[str, Any]:
 # by file SHA-256 and never regenerated. Later target facts ship as a new seed version
 # with a new asset version, so nothing is overwritten.
 FROZEN_BUNDLES = {
+    # A dependency of the applied approved-assets 1.0.0 (2026-10-03); the registered families
+    # moved on (MP-10 Human Gate workflow), so the successor 1.0.1 carries asset version 2.
+    "common/mc.catalog.workflow-parity-1.0.0.json": (
+        "9305587bbfeff823835e7f0ad9ea1ecdb54bf5a403e0006a28568af0d164b739"
+    ),
     # Applied to both live projects on 2026-10-03 (seed digest sha256:f45e04f9...). Its
     # sources moved on (FT-A1 relabelled the coordinator skill kind, the router manifest is
     # newer), so the successor below carries only the logical keys 1.0.0 does not hold.
@@ -572,7 +601,7 @@ def storage_capability_bundles() -> dict[str, Any]:
 
 def build_bundles() -> dict[str, dict[str, Any]]:
     bundles = {
-        "common/mc.catalog.workflow-parity-1.0.0.json": workflow_parity(),
+        "common/mc.catalog.workflow-parity-1.0.1.json": workflow_parity_successor(),
         "common/mc.catalog.runtime-profiles-1.0.0.json": runtime_profiles(),
         "common/mc.catalog.approved-assets-1.0.1.json": approved_assets_successor(),
         "qualification/mc.qualification.parity-1.0.0.json": qualification_parity(),

@@ -346,17 +346,55 @@ Names only; values come from the operator environment. See
   commit hints between API processes over `REDIS_URL`; PostgreSQL stays the replay ledger.
   `MISSION_SOCKET_POSTGRES_HINTS` (default true) listens on the 0032 `mc_stream_hint`
   channel of every configured application database to wake the same pumps.
+  `MISSION_SOCKET_REAUTHORIZE_SECONDS` (5) re-verifies an idle connection's credential;
+  `MISSION_SOCKET_COMMAND_FOLLOW_SECONDS` (120) bounds how long a socket command's
+  accepted/delivered/applied receipts are followed.
 - `GET|POST /v1/applications/{app}/human-tasks[...]` (MP-10): Human Gate tasks and the one
   resolution path; MCP tools `mission_human_task_*` and the socket event
   `resolve_human_task` call the same service. Both family workers register the
-  `mc.human_gate.v1` control activation and its activities.
+  `mc.human_gate.v1` control activation and its activities. A Goal Loop whose acceptance
+  requires `human` and whose manifest names no gate reviewer is reviewed by the `owner`
+  reviewer role (principal `owner` or a verified `reviewer:owner` grant).
+- Native approvals and governed effects (MP-11, release 1.2.0):
+  `POST /v1/applications/{app}/human-tasks/{id}/approval-resolutions` takes the extended body
+  (approve with edited arguments, question answers, elicitation content, cancel); the same
+  `resolve_human_task` socket event accepts it. MCP: `mission_governed_prepare`,
+  `mission_governed_execute`, `mission_governed_status`, `mission_approval_resolve`. Governed
+  tools are trusted Python composition (`RuntimeOptions.governed_tools`); none is registered by
+  default. An admitted cancel closes the run's open approval tasks.
+  `MISSION_CONTROL_APPROVAL_WAIT_S` (300) bounds a native permission callback's wait inside a
+  `lane.turn` segment; the Human Task stays open after it.
+- Coordinator inbox (MP-15, release 1.2.0): `POST /v1/applications/{app}/coordinator-inboxes`,
+  `GET .../coordinator-inboxes/{id}/notifications`, `POST .../{id}/acks`,
+  `POST .../{id}/notifications/{nid}/commands`, `DELETE .../{id}`; MCP
+  `coordinator_inbox_subscribe|poll|ack|command` on the development MCP server. Composed only
+  where the application database has `mission_control.coordinator_inbox`; otherwise the routes
+  answer `503 inbox_unavailable`. Webhook callbacks are egress-guarded
+  (`WEBHOOK_ALLOW_LOOPBACK`, `WEBHOOK_ALLOWED_NETWORKS`).
+- Continuation (MP-12): the worker serves `continuation.*` on the cognitive queue and drives
+  Session Lane transfers from the operation workflow. Context policy:
+  `MISSION_CONTROL_CONTEXT_SOFT_RATIO` (0.70), `..._HARD_RATIO` (0.85), `..._RESERVE_RATIO`
+  (0.15), `MISSION_CONTROL_CONTEXT_MAX_SESSION_TURNS`,
+  `MISSION_CONTROL_CONTINUATION_MAX_TRANSFERS` (8),
+  `MISSION_CONTROL_CONTINUATION_MAX_COMPACTION_FAILURES` (2),
+  `MISSION_CONTROL_NATIVE_COMPACTION` (`preferred|disabled|required`).
+- Local Claude and Codex lanes (MP-07/MP-08; Linux/WSL workers only):
+  `MISSION_CONTROL_CLAUDE_LANE=true` with `MISSION_CONTROL_CLAUDE_LEASE_ROOT`,
+  `..._CLAUDE_INIT_TIMEOUT_S`, `..._CLAUDE_DRAIN_TIMEOUT_S`; `MISSION_CONTROL_CODEX_LANE=true`
+  with `MISSION_CONTROL_CODEX_BINARY`, `..._CODEX_LEASE_ROOT`, `..._CODEX_HOME_MODE`
+  (`isolated|owner`), `..._CODEX_OWNER_HOME`, `..._CODEX_REPOSITORY`. Both also need
+  `MISSION_CONTROL_AUTH_PROFILES_PATH`; neither is qualified, so the registry admits them only
+  with `MISSION_CONTROL_ALLOW_UNQUALIFIED_LANES`. Claude/Codex/Cursor units always run through
+  `lane.turn` segments on their binding's task queue.
 - Session ownership (MP-06): `MISSION_CONTROL_SESSION_LEASE_MIN_S` (10),
   `MISSION_CONTROL_SESSION_LEASE_HEARTBEATS` (2),
   `MISSION_CONTROL_DISPATCH_RECEIPT_GRACE_S` (10). Every new native dispatch is admitted
   against the run's Stop Fence before it is issued.
 - Auth routes and capacity waits (MP-05): `MISSION_CONTROL_AUTH_PROFILES_PATH`,
   `MISSION_CONTROL_ALLOW_UNQUALIFIED_AUTH_ROUTES`, `MISSION_CONTROL_AUTH_STATUS_PROBE`,
-  `MISSION_CONTROL_AUTH_STATUS_TIMEOUT_S`, `MISSION_CONTROL_CAPACITY_*`.
+  `MISSION_CONTROL_AUTH_STATUS_TIMEOUT_S`, `MISSION_CONTROL_CAPACITY_*`. The capacity bounds
+  travel with every operation request (`OperationWorkflowRequest.capacity_wait`) into the
+  workflow's provider-limit planner.
 - Local readiness (MP-22): `MISSION_CONTROL_LOCAL_RUN_PROFILE` (an
   `mc.local_run_profile.v1` file) and `MISSION_CONTROL_PREFLIGHT_WORKSPACE_ROOT`. The worker
   verifies capability pins and, with a profile, lane hosts before it polls
@@ -365,9 +403,24 @@ Names only; values come from the operator environment. See
   the run to its Temporal cluster in `mission_control.run_cluster_binding` (migration 0032);
   a launch from a service bound to another cluster is refused
   (`run_bound_to_other_cluster`) instead of starting a second copy.
-- Release: `component/manifest.json` is rebuilt at 0032 (release 1.1.0, never installed
-  live); `deployments/*/release.lock.json` still pin the committed 1.1.0 manifest
-  (0001-0030, `0853a2c0...`) until the owner accepts the release; the live projects hold 1.0.0.
+- Workspace resource roots: `workspace://` pin locators resolve under the checkout's parent
+  (BellLabs: `platform/`). The declared resource roots `.agents` and `.tools`
+  (`capability_pins.WORKSPACE_RESOURCE_ROOTS`) may be directory links, as the BellLabs
+  `platform/.agents` and `platform/.tools` junctions to the Biotech-owned directories are.
+  A locator under one must stay inside that link's target, and the target must keep the
+  root's name. Every other locator must stay inside the workspace's real path, so nested
+  links, undeclared top-level links and `..` spellings are refused. Pinned bytes are verified
+  at the resolved real path.
+- Biotech schema source: the Biotech integration reads the authoritative graph SDL from
+  `BIOTECH_SCHEMA_SDL_PATH` when set, otherwise from
+  `<BellLabs>/biotech/biotech-meta/docs/schema/current_biotech_schema.graphql`. The bytes must
+  equal the published `resources/schema-catalog/source-reference.v1.json` (SHA-256 and
+  length) or they are refused. Mission Control never keeps a copy
+  (`biotech_mission_adapters.bootstrap.schema_source`).
+- Release: the working tree builds release 1.2.0 (0001-0033, fingerprint `sha256:0113df03...`,
+  predecessor the locked 1.1.0); `deployments/*/release.lock.json` still pin 1.1.0 (0001-0030,
+  `0853a2c0...`) until the owner inspects receipts, re-locks and applies; the live projects hold
+  1.0.0. See [persistence](knowledge/persistence.md).
 - Per-profile status: [multi-provider release statement](qualification/release/multi-provider-2026-10.md).
 
 ## Fast-track entrypoints and configuration

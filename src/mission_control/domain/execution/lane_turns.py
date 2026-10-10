@@ -213,7 +213,7 @@ LANE_PAUSE_SEMANTICS: Final[dict[str, str]] = {
     "deep_agents": "pause_at_tool_gate",
     "cursor_local": "unsupported",
     "cursor_cloud": "unsupported",
-    # MP-01 stubs: design intent until the harnesses land (MP-04/05/18/19).
+    # MP-07/MP-08 implement these; the hosted cells stay MP-01 stubs (MP-18/19 blocked).
     "claude_agent_sdk": "pause_at_tool_gate",
     "codex": "pause_at_tool_gate",
     "claude_cloud": "unsupported",
@@ -224,7 +224,8 @@ LANE_RESUME_SEMANTICS: Final[dict[str, str]] = {
     "cursor_local": "wait_then_send",
     "cursor_cloud": "wait_then_send",
     "claude_agent_sdk": "turn_boundary_guaranteed",
-    "codex": "turn_boundary_guaranteed",
+    # MP-08: a `turn/start` on an active Codex thread would steer it; resume sends on idle only.
+    "codex": "wait_then_send",
     "claude_cloud": "wait_then_send",
     "codex_cloud": "unsupported",
 }

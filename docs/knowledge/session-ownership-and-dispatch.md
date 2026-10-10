@@ -1,7 +1,7 @@
 ---
 type: Concept
 title: Session ownership, the dispatch journal and capacity waits
-description: How lane.turn fences a native session to one worker owner, journals every native create and send so an ambiguous dispatch is reconciled or parked in doubt instead of resent, admits each dispatch against the Stop Fence, which optional lane protocols a lane may implement, and how a provider capacity limit becomes a bounded Temporal wait. Auth routes are summarized with their gaps.
+description: How lane.turn fences a native session to one worker owner, journals every native create and send so an ambiguous dispatch is reconciled or parked in doubt instead of resent, admits each dispatch against the Stop Fence, records the attempt and serves dedicated lane queues, which lanes implement the optional reconcile and steer protocols, and how a provider capacity limit becomes a bounded Temporal wait under the deployment's policy. Auth routes are summarized with their gaps.
 tags: [mission-control, harness, lanes, sessions, stop-fence, capacity, implementation]
 ---
 
@@ -47,12 +47,25 @@ column was added. `lane.cancel` with an ambiguous dispatch and no recorded turn 
 `in_doubt` instead of "never sent", and `provider_acknowledged` is recorded when the provider
 acknowledges ([interventions](interventions.md)).
 
+## Attempt recording and lane queues
+
+`admit_lane_session(attempt=)` records the attempt row through `lineage.observe_attempt` when a
+Session Lane unit is admitted; before the 2026-10-09 recovery only the governed Deep Agents path did,
+so Session Lane frames had no attempt row to hang off. Session Lane units run `lane.*` on their
+binding's task queue (`provider_binding.task_queue`, or the Cursor binding's); production used to
+poll only `<base>.agent-cognitive`, so a dedicated queue was never served. Each queue listed in
+`MISSION_CONTROL_LANE_TASK_QUEUES` now gets a lane worker (`ProductionWorkerSet.lanes`,
+`adapters/temporal/worker.py`).
+
 ## Optional lane protocols
 
 `DispatchReconcilingLane` (look a dispatch up by idempotency key) and `SteeringLane` (steer the
 exact native turn, answering `applied` or `stale_target`) are runtime-checkable protocols in
-`dispatch.py`. **No production lane implements either** on the integrated base, so an ambiguous
-Cursor send parks `in_doubt`. `resolve_interrupt_mode` (`application/execution/harness/inject.py`)
+`dispatch.py`. `reconcile_dispatch` is implemented by Claude (state-root dispatch record), Codex
+(live journal, then `thread/read` by `clientId`), Cursor local (this process's memory only, else
+`unknown`) and Cursor cloud (client `agentId`, `latestRunId`); `unknown` still parks `in_doubt`.
+Only Codex implements `SteeringLane` (`turn/steer` with `expectedTurnId`).
+`resolve_interrupt_mode` (`application/execution/harness/inject.py`)
 runs `interrupt_and_inject` in exactly one mode: the frozen per-profile `LANE_COMMAND_SEMANTICS`
 and the describe must agree, and `cooperative_inject` needs a `SteeringLane`; otherwise
 `unsupported`, with no fallback. No profile declares `cooperative_inject` today.
@@ -63,7 +76,10 @@ A lane raises `ProviderCapacityLimited` with an MP-05 `ProviderLimitSignal`; the
 non-retryable `provider_capacity_limit`. Behind patch `mp05-capacity-wait`
 (`adapters/temporal/workflows/operation.py`) the operation workflow calls `plan_limit_response`
 and waits on a Temporal timer that a cancel wakes, bounded by `max_segments × start_to_close_s`
-from the workflow start, then runs the segment again or settles `failed(capacity)`. The pure
+from the workflow start, then runs the segment again or settles `failed(capacity)`. The policy is
+the deployment's: `OperationWorkflowRequest.capacity_wait` carries the `MISSION_CONTROL_CAPACITY_*`
+settings (`operation_heartbeat_policy`, `adapters/temporal/worker.py`) into both family request
+builders; histories without it replay to the defaults. The pure
 rules are in `domain/execution/usage_admission.py`: no automatic switch to another auth route, a
 reset after the deadline is refused, and unobservable cost stays `unknown`
 ([budgets and usage](budgets-and-usage.md)).
@@ -75,16 +91,17 @@ reset after the deadline is refused, and unobservable cost stays `unknown`
 `hosted_product_signin`) with pointed `AuthIssue`s, including `AUTH_ROUTE_SHADOWED` when an API
 key would silently turn a subscription route into API billing. `bootstrap/provider_auth.py` loads `MISSION_CONTROL_AUTH_PROFILES_PATH`, builds child
 environments that drop shadowing keys (`provider_child_environment`) and maps
-`MISSION_CONTROL_CAPACITY_*` to a `LimitWaitPolicy`. No route is account-enabled.
+`MISSION_CONTROL_CAPACITY_*` to a `LimitWaitPolicy`. The Claude and Codex lane compositions run
+auth admission and build their child environments this way ([provider lanes](provider-lanes.md)).
+No route is account-enabled: the owner has not supplied a profiles document.
 
 ## Gaps, reported not resolved
 
-- `compose_auth_admission`, `provider_child_environment` and `capacity_policy` have no production
-  caller on the integrated base: no launch path runs auth admission yet (the lane tickets MP-07,
-  MP-08 and MP-09 are the intended consumers), and the workflow uses `LimitWaitPolicy` defaults,
-  so `MISSION_CONTROL_CAPACITY_*` does not change a wait.
+- `mc.auth_admission.v1` is not persisted (a 0034+ migration once a consumer exists); the Cursor
+  lanes do not run auth admission.
 - The wait ledger resets on Continue-As-New (proposed `limit_wait_ledger` contract delta).
-- A steer is fence-admitted but not journaled; a real OS-process kill drill was not run.
+- A steer is fence-admitted but not journaled; typed owner and journal columns are deferred; a real
+  OS-process kill drill was not run.
 
 # Citations
 
@@ -103,7 +120,8 @@ environments that drop shadowing keys (`provider_child_environment`) and maps
   [usage admission](../../src/mission_control/domain/execution/usage_admission.py),
   [auth admission](../../src/mission_control/application/execution/auth_admission.py),
   [auth composition](../../src/mission_control/bootstrap/provider_auth.py),
-  [worker composition](../../src/mission_control/adapters/temporal/deployment_composition.py).
+  [worker composition](../../src/mission_control/adapters/temporal/deployment_composition.py),
+  [lane workers and capacity policy](../../src/mission_control/adapters/temporal/worker.py).
 - Tests: [dispatch recovery](../../tests/unit/harness/test_mp06_dispatch_recovery.py),
   [journal in PostgreSQL](../../tests/integration/postgres/test_mp06_dispatch_journal_postgres.py),
   [takeover and fence race on Temporal](../../tests/integration/temporal/test_mp06_dispatch_recovery.py),
@@ -111,4 +129,6 @@ environments that drop shadowing keys (`provider_child_environment`) and maps
   [auth admission](../../tests/unit/provider_auth/test_auth_admission.py),
   [usage admission](../../tests/unit/provider_auth/test_usage_admission.py),
   [auth composition](../../tests/unit/mission_control/test_provider_auth_composition.py),
-  [fixture lanes](../../tests/fixtures/mp06_lanes.py).
+  [fixture lanes](../../tests/fixtures/mp06_lanes.py),
+  [Session Lane routing](../../tests/unit/operations/test_session_lane_routing.py),
+  [lane task queue workers](../../tests/unit/runtime/test_lane_task_queue_workers.py).

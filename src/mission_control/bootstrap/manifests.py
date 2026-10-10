@@ -45,6 +45,7 @@ from mission_control.application.authoring.manifest_submit import (
     SubscriptionPort,
     register_manifest_admission_policies,
 )
+from mission_control.application.authoring.provider_launch import CatalogProjectionRows
 from mission_control.application.authoring.service import ControlPlaneService
 from mission_control.application.capabilities.catalog import CatalogService
 from mission_control.application.chains.relay import (
@@ -208,6 +209,12 @@ def compose_manifest_launch_inputs(
         definitions=PostgresManifestSubmissionRepository(pool),
         stage_templates=PostgresStageGraphOperationTemplateRepository(pool),
         goal_templates=PostgresGoalDirectedDocumentRepository(pool),
+        # mission/v2: the catalog rows a claude/codex binding's materialization digest renders.
+        projection_rows=CatalogProjectionRows(
+            PostgresDefinitionRepository(
+                pool, catalog_scope=settings.mission_control_catalog_scope or ""
+            )
+        ),
     )
 
 

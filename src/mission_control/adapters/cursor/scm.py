@@ -54,6 +54,20 @@ def _git_bytes(*args: str, cwd: Path) -> bytes:
     return completed.stdout
 
 
+def _branch_path(path: str) -> PurePosixPath:
+    relative = PurePosixPath(path.replace("\\", "/").lstrip("/"))
+    if ".." in relative.parts or not relative.parts:
+        raise GitWorkspaceError(f"unsafe branch path: {path}")
+    return relative
+
+
+def _blob(mirror: Path, commit: str, relative: PurePosixPath) -> bytes | None:
+    try:
+        return _git_bytes("cat-file", "blob", f"{commit}:{relative.as_posix()}", cwd=mirror)
+    except GitWorkspaceError:
+        return None
+
+
 @dataclass(frozen=True)
 class PublishedBranch:
     branch: str
@@ -89,18 +103,26 @@ class GitBranchPublisher:
     ) -> PublishedBranch:
         mirror = self._mirror(repository)
         base_commit = _git("rev-parse", f"{base_ref}^{{commit}}", cwd=mirror).strip()
+        relatives = [(_branch_path(path), content) for path, content in files]
         existing = _git("ls-remote", "--heads", "origin", branch, cwd=mirror).split()
+        checkout: tuple[str, ...]
         if existing:
-            # Idempotent prepare: the branch was already published for this run.
-            return PublishedBranch(branch=branch, head=existing[0], base_commit=base_commit)
+            # The run branch `mc/<run>` serves every cloud unit of the run (MP-20): a later
+            # unit (a verifier, a later iteration, another stage) commits its own projection
+            # and packet on top of the branch head; a retried prepare whose files are already
+            # there returns the head unchanged (idempotent).
+            head = existing[0]
+            _git("fetch", "--quiet", "origin", head, cwd=mirror)
+            if all(_blob(mirror, head, relative) == content for relative, content in relatives):
+                return PublishedBranch(branch=branch, head=head, base_commit=base_commit)
+            start, checkout = head, ("--detach",)
+        else:
+            start, checkout = base_commit, ("-b", branch)
         with tempfile.TemporaryDirectory(prefix="mc-branch-") as scratch:
             work = Path(scratch) / "work"
-            _git("worktree", "add", "--quiet", "-b", branch, str(work), base_commit, cwd=mirror)
+            _git("worktree", "add", "--quiet", *checkout, str(work), start, cwd=mirror)
             try:
-                for path, content in files:
-                    relative = PurePosixPath(path.replace("\\", "/").lstrip("/"))
-                    if ".." in relative.parts or not relative.parts:
-                        raise GitWorkspaceError(f"unsafe branch path: {path}")
+                for relative, content in relatives:
                     target = work.joinpath(*relative.parts)
                     target.parent.mkdir(parents=True, exist_ok=True)
                     target.write_bytes(content)
@@ -115,10 +137,29 @@ class GitBranchPublisher:
                     cwd=work,
                 )
                 head = _git("rev-parse", "HEAD", cwd=work).strip()
-                _git("push", "--quiet", "origin", f"{branch}:refs/heads/{branch}", cwd=mirror)
+                # A fast-forward of the remote branch (no force): a concurrent agent commit
+                # makes the push fail rather than be overwritten.
+                _git("push", "--quiet", "origin", f"{head}:refs/heads/{branch}", cwd=mirror)
             finally:
                 _git("worktree", "remove", "--force", str(work), cwd=mirror)
         return PublishedBranch(branch=branch, head=head, base_commit=base_commit)
+
+    async def resolve(
+        self, *, repository: str, base_ref: str, branch: str
+    ) -> PublishedBranch | None:
+        """The already-published run branch (head on the remote, base commit of `base_ref`),
+        or None when no such branch exists: what a reattach after a lost worker rehydrates
+        instead of re-publishing (MP-09)."""
+
+        return await asyncio.to_thread(self._resolve, repository, base_ref, branch)
+
+    def _resolve(self, repository: str, base_ref: str, branch: str) -> PublishedBranch | None:
+        mirror = self._mirror(repository)
+        existing = _git("ls-remote", "--heads", "origin", branch, cwd=mirror).split()
+        if not existing:
+            return None
+        base_commit = _git("rev-parse", f"{base_ref}^{{commit}}", cwd=mirror).strip()
+        return PublishedBranch(branch=branch, head=existing[0], base_commit=base_commit)
 
     async def diff(
         self,

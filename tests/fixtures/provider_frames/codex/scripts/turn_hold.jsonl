@@ -1,0 +1,6 @@
+{"_fixture": "codex/scripts/turn_hold", "recorded": false, "note": "FIXTURE, not a live recording: hand-written from the pinned codex-cli 0.162.0 app-server v2 schema (tests/fixtures/provider_frames/codex/schema); replayed by tests/unit/codex/fixture_app_server.py, never by Codex"}
+{"step": "item", "item": {"type": "commandExecution", "id": "item-cmd-3", "command": "pytest -q", "cwd": "/fixture", "commandActions": [], "status": "completed", "exitCode": 0}}
+{"step": "hold"}
+{"step": "item", "item": {"type": "agentMessage", "id": "item-msg-3", "text": "Released and finished."}}
+{"step": "usage", "input": 60, "output": 30}
+{"step": "complete", "status": "completed"}

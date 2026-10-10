@@ -30,6 +30,7 @@ from mission_control.domain.execution.lanes import (
     LaneResumePoint,
     LaneSegmentBounds,
 )
+from mission_control.domain.execution.usage_admission import LimitWaitPolicy
 from mission_control.domain.graph_runtime.identities import (
     QualifiedCheckpointKey,
     RuntimeUnitIdentity,
@@ -1659,6 +1660,10 @@ class AsyncChildCancellationRecord(Contract):
     result_decision: str | None = None
 
 
+# The runtimes whose units are Session Lanes: they always run through `lane.turn` segments.
+SESSION_LANE_RUNTIMES: frozenset[str] = frozenset({"cursor", "claude", "codex"})
+
+
 class OperationWorkflowRequest(Contract):
     """Typed durable wrapper for exactly one semantic operation attempt."""
 
@@ -1694,12 +1699,18 @@ class OperationWorkflowRequest(Contract):
     # workflow id, and where the segment loop stands, carried across continue-as-new.
     seen_cmds: tuple[str, ...] = Field(default=(), max_length=4_096, exclude_if=_empty)
     lane_resume: LaneResumePoint | None = Field(default=None, exclude_if=_absent)
+    # MP-05: the deployment's finite capacity-wait bounds for provider limit responses;
+    # absent in recorded histories (the defaults apply, exactly as before).
+    capacity_wait: LimitWaitPolicy | None = Field(default=None, exclude_if=_absent)
 
     @property
     def segment_driven(self) -> bool:
-        """Whether the unit runs through `lane.turn` segments (always for `cursor`)."""
+        """Whether the unit runs through `lane.turn` segments (always for the Session Lane
+        runtimes `cursor`, `claude` and `codex`)."""
 
-        return self.segments is not None or self.operation.execution_runtime == "cursor"
+        return (
+            self.segments is not None or self.operation.execution_runtime in SESSION_LANE_RUNTIMES
+        )
 
     @model_validator(mode="after")
     def exact_bound_operation(self) -> OperationWorkflowRequest:
@@ -1727,6 +1738,10 @@ class OperationWorkflowRequest(Contract):
         if cursor is not None and cursor.task_queue is not None:
             # FT-G2: the worker queue serving this Cursor lane's `lane.*` activities.
             return cursor.task_queue
+        provider = self.operation.provider_binding
+        if provider is not None and provider.task_queue is not None:
+            # MP-07/MP-08: the worker queue serving this claude/codex lane's `lane.*` activities.
+            return provider.task_queue
         placement = self.operation.native_placement
         if placement is None:
             raise ValueError("operation execution has no exact activity placement")

@@ -174,12 +174,33 @@ def directory_files(relative: str, *, lf: bool) -> list[tuple[str, bytes]]:
     return files
 
 
+# The Lane Profiles the agent-skill seeds publish host support for (the same five as
+# `agent_capabilities.PROFILES`). The provider-hosted profiles MP-01 added later are absent,
+# which `CapabilityHostSupport.status` reads as unsupported: no hosted materialization has
+# been proven (MP-16/17), and leaving them out keeps the applied 1.0.0 seed bytes stable.
+PUBLISHED_PROFILES = ("deep_agents", "cursor_local", "cursor_cloud", "claude_agent_sdk", "codex")
+
+
+def _published_profiles(support: Any) -> Any:
+    """`support` restricted to `PUBLISHED_PROFILES` (a `CapabilityHostSupport`)."""
+
+    return support.model_copy(
+        update={
+            "profiles": {
+                profile: entry
+                for profile, entry in support.profiles.items()
+                if profile.value in PUBLISHED_PROFILES
+            }
+        }
+    )
+
+
 def bundle_sources() -> list[dict[str, Any]]:
     """Every seeded bundle: id, kind, version, applications, files and definition fields."""
 
     from mission_control.domain.capabilities.host_support import all_profiles
 
-    support = all_profiles().model_dump(mode="json")
+    support = _published_profiles(all_profiles()).model_dump(mode="json")
     sources: list[dict[str, Any]] = []
     for spec in THIRD_PARTY_SKILLS:
         fields: dict[str, Any] = {
@@ -343,7 +364,9 @@ def plugin_definition(application_id: str, skill_pins: dict[str, str]) -> Any:
             "title": PLUGIN["title"],
             "description": PLUGIN["description"],
             "manifest": manifest.model_dump(mode="json"),
-            "host_support": manifest.host_support(member_support).model_dump(mode="json"),
+            "host_support": _published_profiles(manifest.host_support(member_support)).model_dump(
+                mode="json"
+            ),
             "secret_refs": sorted(
                 {
                     ref

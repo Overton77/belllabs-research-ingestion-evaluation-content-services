@@ -54,6 +54,7 @@ from mission_control.adapters.capabilities.capability_pins import (
     CapabilityPinError,
     CapabilityPins,
     read_skill_bundle,
+    workspace_path,
     workspace_root,
 )
 from mission_control.adapters.temporal.client import (
@@ -594,13 +595,9 @@ def check_auth(
 
 
 def _locate(root: Path, locator: str) -> Path:
-    if not locator.startswith(WORKSPACE_SCHEME):
-        raise CapabilityPinError(f"locator is not workspace-relative: {locator}")
-    relative = locator.removeprefix(WORKSPACE_SCHEME)
-    path = (root / relative).resolve()
-    if not path.is_relative_to(root.resolve()):
-        raise CapabilityPinError(f"locator escapes the workspace: {locator}")
-    return path
+    # The worker's own resource-root contract (relocated `.agents`/`.tools` links resolve
+    # beneath their declared targets; every other escape is refused).
+    return workspace_path(locator, root=root)
 
 
 def _file_digest(path: Path) -> str:

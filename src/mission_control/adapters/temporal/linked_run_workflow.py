@@ -56,6 +56,24 @@ def linked_root_input(link: RunCompositionLink, payload: dict[str, Any]) -> Bell
     return root
 
 
+LINKED_CHILD_FAILED_PATCH = "mp20-linked-child-concluded-failed"
+
+
+def _concluded_failed(result: object) -> bool:
+    """Whether a child family's returned result concluded `failed` (StageGraph completion
+    proposal `failed`, GoalDirected terminalization `fail`)."""
+
+    if isinstance(result, StageGraphRunResult):
+        return bool(getattr(result.completion_proposal, "failed", False))
+    if not isinstance(result, dict):
+        return False
+    completion = result.get("completion_proposal")
+    if isinstance(completion, dict) and completion.get("failed") is True:
+        return True
+    terminalization = result.get("terminalization_proposal")
+    return isinstance(terminalization, dict) and terminalization.get("proposed_outcome") == "fail"
+
+
 @workflow.defn(name="belllabs.linked-run")
 class LinkedRunWorkflow:
     """Starts an observer that may outlive the parent-facing linked workflow."""
@@ -241,6 +259,25 @@ class LinkedRunObserverWorkflow:
                     "status": status,
                     "exact_output_refs": [],
                     "failure_ref": f"temporal-child:{failure_name}",
+                    "observed_at": workflow.now().isoformat(),
+                }
+            )
+            return self._result_payload(
+                link,
+                resolution,
+                current_epoch=current_epoch,
+                continuation=continuation,
+            )
+        if _concluded_failed(result) and workflow.patched(LINKED_CHILD_FAILED_PATCH):
+            # MP-20: a family that concluded `failed` (a denied Human Gate, a failed stage the
+            # graph cannot route around, a failed Goal Loop) returns normally; the link must
+            # observe a failed child, never a completed one.
+            resolution = await self._resolve_observation(
+                {
+                    "link": link.model_dump(mode="json"),
+                    "status": "failed",
+                    "exact_output_refs": [],
+                    "failure_ref": "family:concluded_failed",
                     "observed_at": workflow.now().isoformat(),
                 }
             )

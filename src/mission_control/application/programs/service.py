@@ -70,6 +70,7 @@ from mission_control.domain.programs.contracts import (
     GoalRevision,
     LifecycleCommandOutcome,
     LifecycleCommandRequest,
+    StageAuthoredInput,
     StageGraphAcceptedProjection,
     StageGraphAdmissionActivityRequest,
     StageGraphAdmissionActivityResult,
@@ -77,6 +78,7 @@ from mission_control.domain.programs.contracts import (
     StageGraphBaselineSettlementResult,
     StageGraphCompletionActivityRequest,
     StageGraphCompletionActivityResult,
+    StageGraphCompletionProposal,
     StageGraphCycleActivityRequest,
     StageGraphCycleActivityResult,
     StageGraphDecisionMutation,
@@ -108,6 +110,17 @@ def orchestration_lifecycle_actor() -> ActorContext:
         authority_refs=frozenset({ORCHESTRATION_AUTHORITY_REF}),
         permissions=frozenset(ACTION_PERMISSIONS.values()),
     )
+
+
+def _completion_payload(proposal: StageGraphCompletionProposal) -> dict[str, object]:
+    """The recorded completion decision; the MP-20 concluded-failure fields are additive and
+    omitted when absent, so every other completion records exactly what it did before."""
+
+    payload = asdict(proposal)
+    if not proposal.failed:
+        payload.pop("failed")
+        payload.pop("skipped_stage_ids")
+    return payload
 
 
 class OrchestrationBindingVerifier(Protocol):
@@ -164,6 +177,7 @@ class StageGraphLaunchService:
         orchestration_authority_ref: str = ORCHESTRATION_AUTHORITY_REF,
         semantic_input_binding_ref: str = "",
         human_gates: tuple[HumanGateSpec, ...] = (),
+        authored_inputs: tuple[StageAuthoredInput, ...] = (),
     ) -> StageGraphRunInput:
         if execution_epoch != 1:
             raise ValueError(
@@ -184,7 +198,21 @@ class StageGraphLaunchService:
         )
         if blueprint_ref is None or blueprint_ref.digest != sha256_digest(blueprint):
             raise ValueError("exact StageGraph reference does not match the frozen blueprint")
+        _check_authored_inputs(authored_inputs, blueprint)
         budget = await self._run_control.get_budget(request_scope, run_id)
+        # MP-10: a stage that runs as a Human Gate is its own human control; the manifest
+        # lowering's same-id stage wait (pre-MP-10 authoring) is superseded by it, or the gate
+        # child would never start.
+        gate_keys = {gate.gate_key for gate in human_gates}
+        superseded_waits = tuple(
+            sorted(
+                wait.wait_id
+                for wait in blueprint.waits
+                if wait.scope_kind == "stage"
+                and wait.scope_id in gate_keys
+                and wait.wait_id == wait.scope_id
+            )
+        )
         return StageGraphRunInput(
             run_id=run_id,
             request_scope=request_scope,
@@ -201,7 +229,28 @@ class StageGraphLaunchService:
             baseline_reservation=dict(budget.reservations.get("baseline", {})),
             semantic_input_binding_ref=semantic_input_binding_ref,
             human_gates=human_gates,
+            satisfied_wait_ids=superseded_waits,
+            authored_inputs=authored_inputs,
         )
+
+
+def _check_authored_inputs(
+    authored_inputs: tuple[StageAuthoredInput, ...], blueprint: StageGraphBlueprint
+) -> None:
+    """MP-20: every authored input names a dependency of the frozen blueprint, once."""
+
+    edges = {(item.consumer_stage_id, item.producer_stage_id) for item in blueprint.dependencies}
+    seen: set[tuple[str, str]] = set()
+    for item in authored_inputs:
+        if (item.consumer_stage_id, item.producer_stage_id) not in edges:
+            raise ValueError(
+                f"authored input {item.consumer_stage_id}.{item.name} is not delivered by a "
+                f"dependency on {item.producer_stage_id} of the frozen blueprint"
+            )
+        key = (item.consumer_stage_id, item.name)
+        if key in seen:
+            raise ValueError(f"authored input {item.consumer_stage_id}.{item.name} is duplicated")
+        seen.add(key)
 
 
 # Completion proposals one StageGraph run may make (each rejected one keeps its receipt).
@@ -684,7 +733,12 @@ class StageGraphDecisionService:
             exact_operation_request_ref=exact_ref,
             request_scope=request.request_scope,
             decided_at=request.occurred_at,
-            decision_payload={"completion": asdict(request.proposal)},
+            decision_payload={"completion": _completion_payload(request.proposal)},
+        )
+        failure_refs = tuple(
+            item.candidate.semantic_prefix
+            for item in current_projection.stages.values()
+            if item.status == "failed"
         )
         obligation_payload = [
             item.model_dump(mode="json")
@@ -702,11 +756,7 @@ class StageGraphDecisionService:
             accepted_obligation_evidence_digest=sha256_digest(obligation_payload),
             proposing_execution_binding_ref=exact_ref,
             required_obligations_accepted=request.proposal.required_obligations_accepted,
-            execution_failure_refs=tuple(
-                item.candidate.semantic_prefix
-                for item in current_projection.stages.values()
-                if item.status == "failed"
-            ),
+            execution_failure_refs=failure_refs,
             valid_output_refs=request.proposal.valid_output_refs,
             # RRM-008 (REQ-CP-EXEC-008 step 7): the family asserts that every producer
             # liability was reconciled under cancellation; the reducer still requires every
@@ -738,7 +788,11 @@ class StageGraphDecisionService:
                 expected_run_version=run.version,
                 actor=orchestration_lifecycle_actor(),
                 action=TerminalizeAction(proposal=terminal),
-                reason="Reducer-authorized StageGraph obligation completion",
+                reason=(
+                    "StageGraph concluded without acceptance: failed " + ", ".join(failure_refs)
+                    if request.proposal.failed
+                    else "Reducer-authorized StageGraph obligation completion"
+                ),
                 evidence_refs=request.proposal.valid_output_refs,
                 occurred_at=request.occurred_at,
                 correlation_id=request.correlation_id,
@@ -1122,6 +1176,7 @@ class StageGraphOperationPreparationService:
             operation=operation,
             heartbeat_timeout_seconds=self._heartbeats.timeout_for(operation),
             segments=self._heartbeats.segments_for(operation),
+            capacity_wait=self._heartbeats.capacity_wait,
         )
 
 
@@ -1357,6 +1412,7 @@ class WorkflowLaunchDispatcher:
         semantic_input_binding_ref: str = "",
         human_gates: tuple[HumanGateSpec, ...] = (),
         human_review: HumanGateSpec | None = None,
+        stage_inputs: tuple[StageAuthoredInput, ...] = (),
     ) -> PreparedWorkflowInput:
         projection = await self._run_control.get_run(request_scope, run_id)
         configuration = await self._control_plane.retrieve_for_admission(
@@ -1377,6 +1433,7 @@ class WorkflowLaunchDispatcher:
                 orchestration_authority_ref=orchestration_authority_ref,
                 semantic_input_binding_ref=semantic_input_binding_ref,
                 human_gates=human_gates,
+                authored_inputs=stage_inputs,
             )
         if isinstance(blueprint, GoalDirectedBlueprint):
             if self._goal_directed is None:
@@ -1385,6 +1442,8 @@ class WorkflowLaunchDispatcher:
                 raise ValueError("GoalDirected launch requires a concrete initial goal")
             if human_gates:
                 raise ValueError("GoalDirected launch does not accept Stage Graph human gates")
+            if stage_inputs:
+                raise ValueError("GoalDirected launch does not accept Stage Graph stage inputs")
             return await self._goal_directed.prepare(
                 request_scope,
                 run_id,

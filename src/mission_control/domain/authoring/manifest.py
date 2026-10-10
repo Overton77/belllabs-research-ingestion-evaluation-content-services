@@ -1134,6 +1134,10 @@ def _is_mapping_leaf(value: object) -> bool:
     return isinstance(value, dict) and bool(_ENTRY_KEYS & set(value))
 
 
+# Discriminated environment selections (by `kind`) that never deep-merge across kinds.
+_DISCRIMINATED_SELECTIONS: frozenset[str] = frozenset({"execution_environment"})
+
+
 def merge_environment_documents(
     parent: Mapping[str, Any], overlay: Mapping[str, Any]
 ) -> dict[str, Any]:
@@ -1143,6 +1147,15 @@ def merge_environment_documents(
     for key, value in overlay.items():
         current = result.get(key)
         if (
+            key in _DISCRIMINATED_SELECTIONS
+            and isinstance(value, dict)
+            and isinstance(current, dict)
+            and value.get("kind", current.get("kind")) != current.get("kind")
+        ):
+            # mission/v2: a selection of the other kind (hosted over local or the reverse)
+            # replaces the inherited one; merging the two shapes is never a valid selection.
+            result[key] = value
+        elif (
             isinstance(value, dict)
             and isinstance(current, dict)
             and not _is_mapping_leaf(value)

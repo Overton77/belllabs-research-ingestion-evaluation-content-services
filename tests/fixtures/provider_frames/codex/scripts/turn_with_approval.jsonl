@@ -1,0 +1,5 @@
+{"_fixture": "codex/scripts/turn_with_approval", "recorded": false, "note": "FIXTURE, not a live recording: hand-written from the pinned codex-cli 0.162.0 app-server v2 schema (tests/fixtures/provider_frames/codex/schema); replayed by tests/unit/codex/fixture_app_server.py, never by Codex"}
+{"step": "approval", "method": "item/commandExecution/requestApproval", "params": {"command": "rm -rf build", "cwd": "/fixture", "reason": "needs write access outside the sandbox", "kind": "command"}}
+{"step": "item", "item": {"type": "agentMessage", "id": "item-msg-2", "text": "Finished after the approval decision."}}
+{"step": "usage", "input": 80, "output": 20}
+{"step": "complete", "status": "completed"}

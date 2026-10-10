@@ -1,0 +1,85 @@
+# yaml-language-server: $schema=../../../../src/mission_control/contracts/schemas/mc.mission_manifest.v2.json
+# mission/v2 two-member Mission Chain on the local Claude Agent SDK lane: `investigate` (Goal
+# Loop) supplies its accepted findings to `remediate` (Stage Graph). Each member has its own
+# budget, auth and environment; only the declared output crosses the link. Checked example
+# (MP-02): compiled by tests/unit/authoring/test_manifest_v2_launch.py and launch-authored
+# against deployments/examples/manifest-launch-bindings.multi-provider.example.json.
+manifest: mission/v2
+missions:
+  - key: investigate
+    title: Investigate the flaky integration test (Claude Agent SDK)
+    application: ai-engineer
+    goals:
+      - key: root_cause
+        description: The flake's root cause is identified with a reproduction
+        criteria:
+          - key: findings_recorded
+            description: The findings name the cause and the reproduction command
+            evidence: [findings]
+            acceptance: { schema: findings_note@1 }
+    environment:
+      lane: claude_agent_sdk
+      model: { profile: claude.default }
+      auth: { profile: claude-sdk-owner-subscription }
+      execution_environment: { kind: local_workspace, profile: worker.linux.default }
+      workspace:
+        repo: { url: "https://github.com/Overton77/mission-control-fixture", ref: main }
+        policy: { mode: managed_worktree, reuse: within_run }
+      requires:
+        controls: [cancel]
+        approvals: [workflow_gate]
+        observation: [terminal_result]
+      budget: { tokens: 300000, wall_clock: 2h, tool_calls: 150 }
+      governors: { depth: 1, fan_out: 1, iterations: 2, patience: 2 }
+      side_effects: [read_only, workspace_write]
+    program:
+      key: root
+      behavior: goal_loop
+      objective: root_cause
+      action_space: [root]
+      verifier: { independent: true }
+      outputs:
+        - { name: findings, schema: findings_note@1, required: true }
+
+  - key: remediate
+    title: Remediate the flaky integration test (Claude Agent SDK)
+    application: ai-engineer
+    goals:
+      - key: fixed
+        description: The flake is fixed and the suite passes repeatedly
+        criteria:
+          - key: fix_reported
+            description: The fix report lists the change and the repeated passing runs
+            evidence: [fix_report]
+            acceptance: { schema: fix_report@1 }
+    environment:
+      lane: claude_agent_sdk
+      model: { profile: claude.default }
+      auth: { profile: claude-sdk-owner-subscription }
+      execution_environment: { kind: local_workspace, profile: worker.linux.default }
+      workspace:
+        repo: { url: "https://github.com/Overton77/mission-control-fixture", ref: main }
+        policy: { mode: managed_worktree, reuse: within_run }
+      requires:
+        controls: [cancel]
+        approvals: [workflow_gate, provider_permission]
+        observation: [terminal_result]
+      budget: { tokens: 300000, wall_clock: 2h, tool_calls: 150 }
+      governors: { depth: 1, fan_out: 1, iterations: 2, patience: 2 }
+      side_effects: [read_only, workspace_write]
+    program:
+      key: root
+      behavior: stage_graph
+      objectives: [fixed]
+      inputs:
+        - { name: findings, from: investigate.findings, expand: materialize }
+      nodes:
+        - key: fix
+          behavior: agent_executor
+          objectives: [fixed]
+          instruction: Apply the fix the findings describe and run the suite three times.
+          outputs: [ { name: fix_report, schema: fix_report@1 } ]
+
+links:
+  - { from: investigate, to: remediate, kind: supplies, outputs: [findings],
+      on: { goal_accepted: { goal_key: root_cause } } }

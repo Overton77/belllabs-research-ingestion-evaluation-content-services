@@ -25,7 +25,7 @@ registered through `additional_components`, exactly like any other exact model r
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
@@ -48,6 +48,12 @@ from mission_control.adapters.cursor import cursor_lane_stubs
 from mission_control.adapters.cursor.bridge import SdkBridgeLauncher
 from mission_control.adapters.cursor.cloud import CursorCloudHarness
 from mission_control.adapters.cursor.cloud_api import CloudAgentsClient
+from mission_control.adapters.cursor.controls import (
+    CursorCloudSessionHydrator,
+    CursorCloudWorkspaceSnapshots,
+    CursorSessionHydrator,
+    CursorWorkspaceSnapshots,
+)
 from mission_control.adapters.cursor.hooks_callback import CursorHookMapper
 from mission_control.adapters.cursor.local import CursorLocalHarness, CursorLocalSettings
 from mission_control.adapters.cursor.projection import (
@@ -96,6 +102,9 @@ from mission_control.adapters.postgres.async_subagents.async_subagents import (
 from mission_control.adapters.postgres.capability_bundles import PostgresCapabilityBundleAdmissions
 from mission_control.adapters.postgres.chains.store import PostgresChainSupplies
 from mission_control.adapters.postgres.context.artifact_bytes import PostgresArtifactBytes
+from mission_control.adapters.postgres.context.continuation_repository import (
+    PostgresContinuationRepository,
+)
 from mission_control.adapters.postgres.context.selection_repository import (
     PostgresContextSelectionRepository,
 )
@@ -154,12 +163,22 @@ from mission_control.adapters.storage.filesystem_workspace import FilesystemWork
 from mission_control.adapters.supabase_storage.bundles import configured_supabase_bundle_reader
 from mission_control.adapters.temporal.activities.human_gate import HumanGateActivities
 from mission_control.adapters.temporal.artifact_activities import ArtifactPromotionActivities
+from mission_control.adapters.temporal.continuation_composition import (
+    ContinuationSettings,
+    compose_lane_continuation,
+)
 from mission_control.adapters.temporal.coordinator_runtime import (
     GoalDirectedCoordinatorDependencies,
     StageGraphCoordinatorDependencies,
     create_routed_coordinator_activities,
 )
 from mission_control.adapters.temporal.operation_activities import OperationExecutionActivities
+from mission_control.adapters.temporal.provider_lane_composition import (
+    compose_approval_broker,
+    compose_claude_local_lane,
+    compose_codex_local_lane,
+    provider_registrations,
+)
 from mission_control.adapters.temporal.unit_reconciliation import TemporalUnitReconciliationNudge
 from mission_control.adapters.temporal.worker import (
     WorkerActivityComposition,
@@ -181,6 +200,8 @@ from mission_control.application.artifacts.workspace_materialization import (
     WorkspaceMaterializationService,
 )
 from mission_control.application.authoring.service import ControlPlaneService
+from mission_control.application.context.hydrators import LaneContinuationRegistration
+from mission_control.application.context.lane_continuation import ContinuationHoldOracle
 from mission_control.application.context.pack_service import ContextPackService
 from mission_control.application.coordinator.coordinator_results import (
     TerminalWorkflowCompletionService,
@@ -199,6 +220,10 @@ from mission_control.application.execution.mailbox import MailboxDeliveryService
 from mission_control.application.execution.operations.checkpoint_lineage import DEFAULT_CLAIM_LEASE
 from mission_control.application.execution.operations.journaled_operation_execution import (
     JournaledOperationExecutionCoordinator,
+)
+from mission_control.application.execution.operations.lane_outputs import (
+    LaneOutputCustody,
+    WorkspaceCandidateLaneOutputs,
 )
 from mission_control.application.execution.operations.operation_execution import (
     OperationExecutionService,
@@ -471,7 +496,61 @@ def registered_lane_profiles(settings: Settings) -> tuple[str, ...]:
     profiles = ["deep_agents"]
     if settings.cursor_api_key is not None:
         profiles += ["cursor_local", "cursor_cloud"]
+    # Mirrors the opt-ins of `provider_lane_composition` (the host gate itself is what
+    # MP-22 preflight checks for these profiles).
+    if settings.mission_control_auth_profiles_path is not None:
+        if settings.mission_control_claude_lane:
+            profiles.append("claude_agent_sdk")
+        if settings.mission_control_codex_lane:
+            profiles.append("codex")
     return tuple(profiles)
+
+
+def continuation_settings(settings: Settings) -> ContinuationSettings:
+    """MP-12: the worker's context-pressure policy and governors from `Settings`."""
+
+    return ContinuationSettings(
+        soft_context_ratio=settings.mission_control_context_soft_ratio,
+        hard_context_ratio=settings.mission_control_context_hard_ratio,
+        reserve_ratio=settings.mission_control_context_reserve_ratio,
+        max_session_turns=settings.mission_control_context_max_session_turns,
+        max_transfers=settings.mission_control_continuation_max_transfers,
+        max_compaction_failures=settings.mission_control_continuation_max_compaction_failures,
+        native_compaction=settings.mission_control_native_compaction,
+    )
+
+
+def lane_continuation_registrations(
+    *,
+    cursor_local: CursorLocalHarness | None,
+    cursor_cloud: CursorCloudHarness | None,
+    durable_bytes: Any,
+    snapshot_store: Any,
+    extra: Sequence[LaneContinuationRegistration] = (),
+) -> tuple[LaneContinuationRegistration, ...]:
+    """MP-12: the composed Session Lanes' continuation registrations (never `qualified`)."""
+
+    registrations: list[LaneContinuationRegistration] = []
+    if cursor_local is not None:
+        local = cursor_local
+        registrations.append(
+            LaneContinuationRegistration(
+                "cursor_local",
+                lambda _scope: CursorSessionHydrator(local, durable_bytes),
+                snapshots=lambda _scope: CursorWorkspaceSnapshots(local, snapshot_store),
+            )
+        )
+    if cursor_cloud is not None:
+        cloud = cursor_cloud
+        registrations.append(
+            LaneContinuationRegistration(
+                "cursor_cloud",
+                lambda _scope: CursorCloudSessionHydrator(cloud, durable_bytes),
+                snapshots=lambda _scope: CursorCloudWorkspaceSnapshots(cloud, snapshot_store),
+            )
+        )
+    registrations.extend(extra)
+    return tuple(registrations)
 
 
 def goal_output_schemas() -> dict[str, type[Any]]:
@@ -501,6 +580,8 @@ def compose_lane_registry(
     *,
     cursor_local: AgentHarness | None = None,
     cursor_cloud: AgentHarness | None = None,
+    claude_local: AgentHarness | None = None,
+    codex_local: AgentHarness | None = None,
 ) -> LaneRegistry:
     """`deep_agents` always; the Cursor profiles when a Cursor credential is bound: the real
     `cursor_local` (FT-G3) and `cursor_cloud` (FT-G5) harnesses when composed, otherwise
@@ -512,11 +593,17 @@ def compose_lane_registry(
         local_stub, cloud_stub = cursor_lane_stubs()
         harnesses.append(cursor_local if cursor_local is not None else local_stub)
         harnesses.append(cursor_cloud if cursor_cloud is not None else cloud_stub)
+    # MP-07/MP-08: the local Claude and Codex lanes, when composed for this worker.
+    harnesses.extend(lane for lane in (claude_local, codex_local) if lane is not None)
     return LaneRegistry(harnesses, allow_unqualified=settings.allow_unqualified_lanes)
 
 
 def compose_cursor_cloud(
-    settings: Settings, pool: asyncpg.Pool, payloads: ArtifactPayloadPort
+    settings: Settings,
+    pool: asyncpg.Pool,
+    payloads: ArtifactPayloadPort,
+    *,
+    outputs: LaneOutputCustody | None = None,
 ) -> tuple[CursorCloudHarness, CloudAgentsClient] | None:
     """The `cursor_cloud` lane (FT-G5) over the Cloud Agents API v1 when a Cursor credential
     is bound. Branches are published through the worker's git configuration; the cloud
@@ -542,12 +629,17 @@ def compose_cursor_cloud(
         ),
         artifacts=files,
         inputs=files,
+        outputs=outputs,
     )
     return harness, client
 
 
 def compose_cursor_local(
-    settings: Settings, pool: asyncpg.Pool, payloads: ArtifactPayloadPort
+    settings: Settings,
+    pool: asyncpg.Pool,
+    payloads: ArtifactPayloadPort,
+    *,
+    outputs: LaneOutputCustody | None = None,
 ) -> tuple[CursorLocalHarness, HookCallbackService] | None:
     """The `cursor_local` lane (FT-G3) and its Kernel Hook callback service, when a Cursor
     credential is bound. Leases, tokens, intents and frames persist in the common component;
@@ -581,6 +673,7 @@ def compose_cursor_local(
         hooks=hooks,
         artifacts=files,
         inputs=files,
+        outputs=outputs,
         settings=CursorLocalSettings(
             lease_root=lease_root,
             callback_base_url=f"http://127.0.0.1:{settings.mission_control_hook_callback_port}",
@@ -868,18 +961,43 @@ class ProductionWorkerActivityCompositionFactory:
             launch_verifier=verifier,
         )
         secrets = EnvironmentSecretResolver()
+        # MP-20: a Session Lane's `outputs/` files become digest-checked workspace candidates
+        # of the exact binding (the families' typed obligations resolve them).
+        lane_outputs = WorkspaceCandidateLaneOutputs(
+            workspaces=BindingWorkspaceMaterializer(service_for_scope=workspaces_for_scope),
+            candidates=candidates,
+        )
         # FT-G3: the real `cursor_local` lane and its hook callbacks when Cursor is bound.
-        cursor = compose_cursor_local(settings, postgres_pool, payloads)
+        cursor = compose_cursor_local(settings, postgres_pool, payloads, outputs=lane_outputs)
         # FT-G5: the real `cursor_cloud` lane over the Cloud Agents API v1.
-        cloud = compose_cursor_cloud(settings, postgres_pool, payloads)
+        cloud = compose_cursor_cloud(settings, postgres_pool, payloads, outputs=lane_outputs)
         if cloud is not None:
             resources.push_async_callback(cloud[1].aclose)
+        # MP-06/MP-11: one owner ref per worker process fences its native sessions and holds
+        # its native approval handles (the broker binds every request to a durable task).
+        owner_ref = default_owner_ref(self._worker_identity)
+        broker = compose_approval_broker(postgres_pool, connection_ref=owner_ref)
+        # MP-07: the local Claude lane when opted in, authenticated and spawnable here.
+        claude = compose_claude_local_lane(
+            settings,
+            postgres_pool,
+            payloads,
+            broker=broker,
+            worker_ref=owner_ref,
+            outputs=lane_outputs,
+        )
+        # MP-08: the local Codex app-server lane under the same conditions.
+        codex = compose_codex_local_lane(
+            settings, postgres_pool, payloads, broker=broker, outputs=lane_outputs
+        )
         # FT-G1: the lane registry is built once per worker (SPEC-07 section 3).
         lanes = compose_lane_registry(
             settings,
             DeepAgentsHarness(adapter, secrets),
             cursor_local=cursor[0] if cursor is not None else None,
             cursor_cloud=cloud[0] if cloud is not None else None,
+            claude_local=claude,
+            codex_local=codex,
         )
         # FT-F1: the command mailbox; Delivery Reports name what the registered lane declares.
         mailbox = MailboxDeliveryService(
@@ -890,6 +1008,8 @@ class ProductionWorkerActivityCompositionFactory:
             ),
             # FT-F4: a unit a fork reuses runs no turn and takes no queued content.
             reuse=ForkReuseOracle(PostgresForkMaterializationStore(postgres_pool)),
+            # MP-12: while a continuation fences the run, held entries stay queued.
+            holds=ContinuationHoldOracle(PostgresContinuationRepository(postgres_pool)),
         )
         injections = InterruptAndInjectService(mailbox, packs=context_packs)
         service = OperationExecutionService(
@@ -932,11 +1052,31 @@ class ProductionWorkerActivityCompositionFactory:
         # Lanes persist frames through the FrameSink and lane state on harness_execution;
         # the Deep Agents lane runs its governed body through `lane.turn` unchanged.
         frame_store = PostgresFrameRepository(postgres_pool)
+        lane_states = PostgresLaneExecutionStateStore(postgres_pool)
+        # MP-12: continuation of Session Lanes. Each lane registers its hydrator and snapshot
+        # port; the operation workflow drives the persisted phase machine on this queue.
+        durable_bytes = _DurableInputsFromPayloads(payloads)
+        registrations = lane_continuation_registrations(
+            cursor_local=cursor[0] if cursor is not None else None,
+            cursor_cloud=cloud[0] if cloud is not None else None,
+            durable_bytes=durable_bytes,
+            snapshot_store=context_files,
+            extra=provider_registrations(claude, codex, context_files),
+        )
+        continuation = compose_lane_continuation(
+            postgres_pool,
+            run_control,
+            packets=context_packs,
+            states=lane_states,
+            frames=frame_store,
+            registrations=registrations,
+            settings=continuation_settings(settings),
+        )
         lane_turns = LaneTurnService(
             lanes=lanes,
             boundary=service,
             frames=frame_store,
-            states=PostgresLaneExecutionStateStore(postgres_pool),
+            states=lane_states,
             secrets=secrets,
             frame_facts=FrameFactProjector(frame_store, run_control, actor=actor),
             # FT-G4: queued content rides the next send (`wait_then_send`), an injected
@@ -949,12 +1089,14 @@ class ProductionWorkerActivityCompositionFactory:
             # owner), and the Stop Fence every new native dispatch (create/send) is admitted
             # against before it is issued.
             sessions=WorkerSessionManager(
-                owner_ref=default_owner_ref(self._worker_identity),
+                owner_ref=owner_ref,
                 min_lease=timedelta(seconds=settings.mission_control_session_lease_min_s),
                 lease_heartbeats=settings.mission_control_session_lease_heartbeats,
             ),
             fences=PostgresStopFenceRepository(postgres_pool),
             receipt_grace_s=settings.mission_control_dispatch_receipt_grace_s,
+            # MP-12: context pressure at a turn's terminal frame and pending transfers.
+            continuations=continuation.coordinator,
         )
         self.operation = ProductionOperationComposition(
             service=service,
@@ -1017,7 +1159,10 @@ class ProductionWorkerActivityCompositionFactory:
         return WorkerActivityComposition(
             coordinator=coordinator,
             operation=OperationExecutionActivities(
-                service, worker_identity=self._worker_identity, lane_turns=lane_turns
+                service,
+                worker_identity=self._worker_identity,
+                lane_turns=lane_turns,
+                continuation=continuation.activities,
             ),
             artifacts=ArtifactPromotionActivities(service=promotion, candidates=candidates),
             resources=resources,

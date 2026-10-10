@@ -1,7 +1,7 @@
 ---
 type: Verification Reference
 title: Evidence and qualification gates
-description: What deterministic local tests establish and what remains unproved, including the per-profile status of the seven lane profiles after the multi-provider packet's waves 0 to 2.
+description: What deterministic local tests establish and what remains unproved, including the per-profile status of the seven lane profiles after the multi-provider recovery integration (none live-qualified, hosted parity blocked).
 tags: [mission-control, implementation]
 ---
 
@@ -33,29 +33,31 @@ Postgres-parity acceptance suites) need a disposable PostgreSQL 17 with pgvector
 `MISSION_CONTROL_TEST_ADMIN_DSN` and fail, never skip, without it. Temporal replay suites
 (`tests/integration/temporal/test_replay_histories.py`, `test_lane_replay_histories.py`) replay
 captured histories on the current worker. `make lane-qualify` runs the offline lane suites, and
-`LIVE=1` adds the paid Cursor drill, which has not run. `scripts/fast_track_dry_run.py` installs
+`LIVE=1` adds the paid owner-run drill (Cursor, Claude Agent SDK, Codex), none of which has run. `scripts/fast_track_dry_run.py` installs
 release 1.1.0 and the seeds on scratch databases and compiles and submits the three fixture
 manifests without Temporal. None of these is a live mission; see
 [release and qualification](release-and-qualification.md).
 
-## Multi-provider profiles (2026-10-09, waves 0 to 2 integrated)
+## Multi-provider profiles (2026-10-10, recovery integration)
 
-The packet adds fixture lanes (`tests/fixtures/mp06_lanes.py`), recorded or synthetic provider
-fixtures (`tests/unit/frames/fixtures/`, `tests/fixtures/projections/discovery/`) and real-service
-modules for the dispatch journal, Human Gates, the socket, the 0032 release and the cluster
-guard. Fixtures prove Mission Control's own rules, never provider behavior. Status per profile
-(full statement with evidence and blocked requirements:
-[release statement](../qualification/release/multi-provider-2026-10.md)):
+The packet adds fixture lanes (`tests/fixtures/mp06_lanes.py`, `mp12_lanes.py`), FIXTURE provider
+clients (`tests/unit/claude/fixtures.py`, `tests/unit/codex/fixture_app_server.py`, the Cursor
+responders), recorded or synthetic frame fixtures (`tests/fixtures/provider_frames/`) and
+real-service modules for the dispatch journal, Human Gates, approvals, continuation, the socket,
+coordinator inboxes, releases 0032 and 0033 and the MP-20 parity suite
+(`tests/integration/temporal/test_mp20_workflow_parity.py`). Fixtures prove Mission Control's own
+rules, never provider behavior. Status per profile (full statement, declared support and blocked
+requirements: [release statement](../qualification/release/multi-provider-2026-10.md)):
 
-| Profile | Code on the integrated base | Live-qualified | Account-qualified |
+| Profile | Implemented and evidence | Live-qualified | Account-enabled |
 | --- | --- | --- | --- |
-| `deep_agents` | lane, production launch, chains, Human Gates; DB/Temporal-tested with deterministic cognition | flag `qualified=True` (WP-CP-040); no live run in this packet | no |
-| `cursor_local`, `cursor_cloud` | lanes; offline and fixture DB/Temporal suites | no (drill unrun) | no |
-| `claude_agent_sdk`, `codex` | describe stub, projection, frame mapping, auth routes; no harness (MP-07, MP-08 in flight) | no | no |
-| `claude_cloud`, `codex_cloud` | describe stub with refusals everywhere; Outcome 3 | no | no |
+| `deep_agents` | lane, production launch, chains, Human Gates; offline, DB and Temporal (MP-20) with a FIXTURE chat model | flag `qualified=True` (WP-CP-040); no live run in this packet | no |
+| `cursor_local`, `cursor_cloud` | lanes with MP-09 parity; offline, DB and Temporal (MP-20, FIXTURE bridge and Cloud API) | no (OVE-55 drill unrun) | no |
+| `claude_agent_sdk`, `codex` | lanes composed opt-in on Linux/WSL workers; offline, DB and Temporal with FIXTURE clients ([provider lanes](provider-lanes.md)) | no (drill runners exist, unrun) | unknown |
+| `claude_cloud`, `codex_cloud` | describe stubs with refusals everywhere; Outcome 3, revalidated 2026-10-09 | no | no |
 
-No `qualified` flag changed. All-provider completion stays open until hosted parity (MP-21),
-which is blocked.
+No `qualified` flag changed. All-provider completion stays open: no profile is live-qualified and
+hosted parity (MP-21) is blocked.
 
 Broad Knowledge Services generalization is deferred (the shared contracts are required scope; see [knowledge-services](knowledge-services.md)). Removing a legacy adapter is
 a clean-break source decision, not a migration of historical data or a claim that
@@ -69,6 +71,7 @@ every future general Mission Control workflow type is implemented.
 - Exact suite results: `docs/MISSION_CONTROL_IMPLEMENTATION_STATUS.md`.
 - [Lane qualification](../qualification/lanes/README.md); [dry run](../../scripts/fast_track_dry_run.py).
 - [Multi-provider release statement](../qualification/release/multi-provider-2026-10.md);
+  [MP-20 parity record](../qualification/parity/multi-provider-2026-10-09.md);
   [local profile readiness](../qualification/local-profiles/README.md);
   [VALIDATION](../specs/multi-provider-2026-10/VALIDATION.md).
 - Changed paths, recovery and removals: `docs/REMOVAL_GUIDE.md`.

@@ -15,7 +15,8 @@ from mission_control.application.programs.human_gates import (
 )
 from mission_control.domain.authoring.contracts import StageGraphBlueprint
 from mission_control.domain.programs.contracts import StageGraphRunInput
-from tests.unit.authoring.test_manifest_launch_inputs import compile_programs
+from tests.unit.authoring.manifest_launch_fixture import deep_agents_chain
+from tests.unit.authoring.test_manifest_launch_inputs import MISSION_2, compile_programs
 
 ROOT = Path(__file__).resolve().parents[3]
 MISSION_1 = ROOT / "docs/specs/fast-track-2026-10/missions/01-research-ingestion-deep-agents.yml"
@@ -77,7 +78,6 @@ def test_the_production_launch_author_lowers_the_manifest_gates(mission_1, monke
     from typing import Any
 
     from mission_control.application.authoring import manifest_launch_inputs as module
-    from mission_control.application.authoring.manifest_submit import ManifestStartUnavailable
     from mission_control.domain.programs.human_gate import HumanGateSpec
 
     definition, _program = mission_1
@@ -110,7 +110,52 @@ def test_the_production_launch_author_lowers_the_manifest_gates(mission_1, monke
     monkeypatch.setattr(module, "goal_human_review", goal_review)
     gates, review = _asyncio.run(author._human_control("tenant-1", "run-1", "GoalDirected"))
     assert gates == () and review is not None and review.reviewers == ("owner",)
-    # Without any declared reviewer the requirement is refused, never dropped.
+    # Without any declared reviewer the review is assigned to the `owner` role, never dropped.
     monkeypatch.setattr(module, "_human_gate_nodes", lambda _definition: [])
-    with pytest.raises(ManifestStartUnavailable, match="names no reviewer"):
-        _asyncio.run(author._human_control("tenant-1", "run-1", "GoalDirected"))
+    gates, review = _asyncio.run(author._human_control("tenant-1", "run-1", "GoalDirected"))
+    assert gates == () and review is not None and review.reviewers == ("owner",)
+
+
+def test_mission_2_ingestion_review_is_kept_and_assigned_to_the_owner_role() -> None:
+    """Recovery 2026-10-09: the chain consumer's `acceptance.human` must start with a review.
+
+    Mission 2's ingestion Goal Loop requires `human: approved` and (like every mission/v1
+    Goal Loop) has nowhere to declare a reviewer. The production author must neither refuse
+    the consumer nor drop the review: it lowers one goal review gated on the `owner` role.
+    """
+
+    from types import SimpleNamespace
+    from typing import Any
+
+    from mission_control.application.authoring import manifest_launch_inputs as module
+    from mission_control.domain.programs.human_gate import is_reviewer
+
+    definitions, _programs = asyncio.run(
+        compile_programs(deep_agents_chain(MISSION_2.read_text(encoding="utf-8")))
+    )
+    by_key = {definition.mission_key: definition for definition in definitions}
+
+    def author_for(definition: Any) -> Any:
+        class Definitions:
+            async def run_subscriptions(self, _scope: str, _run_id: str) -> dict[str, Any]:
+                return {"definition": definition.model_dump(mode="json")}
+
+        return module.ManifestLaunchInputAuthor(
+            resolver=SimpleNamespace(),  # type: ignore[arg-type]
+            run_control=SimpleNamespace(),  # type: ignore[arg-type]
+            control_plane=SimpleNamespace(),  # type: ignore[arg-type]
+            definitions=Definitions(),
+            stage_templates=SimpleNamespace(),  # type: ignore[arg-type]
+            goal_templates=SimpleNamespace(),  # type: ignore[arg-type]
+        )
+
+    research = asyncio.run(author_for(by_key["research"])._human_control("t", "r", "GoalDirected"))
+    assert research == ((), None)
+    gates, review = asyncio.run(
+        author_for(by_key["ingestion"])._human_control("t", "r", "GoalDirected")
+    )
+    assert gates == () and review is not None
+    assert review.reviewers == ("owner",) and review.remediation_target == "goal/executor"
+    assert is_reviewer(review, "owner", frozenset())
+    assert is_reviewer(review, "someone", frozenset({"reviewer:owner"}))
+    assert not is_reviewer(review, "someone", frozenset({"reviewer:other"}))

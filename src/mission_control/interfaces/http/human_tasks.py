@@ -14,6 +14,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
+from mission_control.application.execution.approvals import ApprovalResolutionRequest
 from mission_control.application.human_tasks.service import (
     HumanTaskRejected,
     HumanTaskService,
@@ -42,6 +43,11 @@ REJECTION_STATUS: dict[str, int] = {
     "decision_not_admitted": 422,
     "feedback_required": 422,
     "invalid_filter": 422,
+    # MP-11: the extended approval resolution body.
+    "edited_arguments_required": 422,
+    "answer_required": 422,
+    "elicitation_content_invalid": 422,
+    "invalid_request": 422,
 }
 
 
@@ -109,6 +115,25 @@ async def resolve_human_task(
 ) -> dict[str, Any]:
     try:
         receipt = await service.resolve(human_task_id, body, principal.actor)
+    except HumanTaskRejected as exc:
+        raise _error(exc) from None
+    return {"application_id": principal.application_id, **receipt.public()}
+
+
+@router.post(
+    "/human-tasks/{human_task_id}/approval-resolutions",
+    dependencies=[Depends(require_strict_json_body)],
+)
+async def resolve_approval_task(
+    human_task_id: str,
+    body: ApprovalResolutionRequest,
+    principal: Principal,
+    service: Service,
+) -> dict[str, Any]:
+    """MP-11: approve_edited, question answers, elicitation content and cancel."""
+
+    try:
+        receipt = await service.resolve_approval(human_task_id, body, principal.actor)
     except HumanTaskRejected as exc:
         raise _error(exc) from None
     return {"application_id": principal.application_id, **receipt.public()}

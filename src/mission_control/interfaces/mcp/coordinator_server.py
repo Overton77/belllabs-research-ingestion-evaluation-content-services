@@ -27,6 +27,10 @@ from mission_control.interfaces.mcp.coordinator_resources import (
     RESOURCE_TEMPLATE_NAMES,
     register_resources,
 )
+from mission_control.interfaces.mcp.governed_gateway import (
+    ScopedGovernedEffects,
+    register_governed_tools,
+)
 from mission_control.interfaces.mcp.human_task_tools import (
     ScopedHumanTasks,
     register_human_task_tools,
@@ -274,6 +278,7 @@ def create_coordinator_server(
     manifests: ScopedManifests | None = None,
     run_control: ScopedRunControl | None = None,
     human_tasks: ScopedHumanTasks | None = None,
+    governed: ScopedGovernedEffects | None = None,
 ) -> FastMCP:
     surface = getattr(
         facade,
@@ -549,6 +554,12 @@ def create_coordinator_server(
     if human_tasks is not None:
         # MP-10 (SPEC-03): Human Task list/get/resolve over the one HumanTaskService.
         register_human_task_tools(server, human_tasks, principals, call=_principal_call)
+    if governed is not None:
+        # MP-11: governed prepare/execute/status (+ the extended approval resolution body
+        # when Human Tasks are composed).
+        register_governed_tools(
+            server, governed, principals, call=_principal_call, human_tasks=human_tasks
+        )
     unavailable_tools = set(PRODUCTION_COORDINATOR_TOOL_NAMES) - set(surface.tools)
     if unavailable_tools:
         server.disable(names=unavailable_tools, components={"tool"})

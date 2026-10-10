@@ -74,6 +74,14 @@ def test_grammar_translates_each_key(text: str, fragment: str) -> None:
     assert f"BellLabsScopeHash = '{search_attribute_scope_hash(SCOPE)}'" in query
 
 
+def test_every_lane_profile_is_a_listable_lane() -> None:
+    """MP-07/MP-08 recovery: `lane=` accepts all seven Lane Profiles (ADR-0035)."""
+
+    for lane in ("claude_agent_sdk", "codex", "claude_cloud", "codex_cloud"):
+        (clause,) = parse_run_query(f"lane='{lane}'").clauses
+        assert clause.value == lane
+
+
 def test_grammar_combines_clauses_and_lists_everything_when_empty() -> None:
     parsed = parse_run_query("lane='deep_agents' AND phase='executing' and status='running'")
     assert [clause.key for clause in parsed.clauses] == ["lane", "phase", "status"]
@@ -84,7 +92,7 @@ def test_grammar_combines_clauses_and_lists_everything_when_empty() -> None:
     "text",
     [
         "tenant='other'",
-        "lane='codex'",
+        "lane='codex_remote'",
         "phase='running'",
         "lane = deep_agents",
         "lane='deep_agents' OR phase='executing'",

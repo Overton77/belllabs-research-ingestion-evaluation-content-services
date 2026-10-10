@@ -204,4 +204,34 @@ async def test_configured_api_authenticates_and_reads_actual_restricted_database
                     "/v1/applications/other/runs/absent/inspection", headers=headers
                 )
                 assert wrong.status_code == 403
+                # Recovery 2026-10-09: release 1.2.0 (0033) composes the MP-15 coordinator
+                # inbox and the MP-11 governed-effect services per tenant, and their HTTP
+                # routes reach them under the tenant scope (absent targets look absent).
+                state_key = (binding.installation_id, binding.application_id, tenant)
+                assert state_key in app.state.mission_control_coordinator_inbox_services
+                assert state_key in app.state.mission_control_governed_effect_services
+                absent = str(uuid4())
+                inbox = await client.post(
+                    "/v1/applications/biotech/coordinator-inboxes",
+                    headers=headers,
+                    json={"target": "mission", "target_id": absent},
+                )
+                assert inbox.status_code == 404, inbox.text
+                assert inbox.json()["detail"]["code"] == "not_found"
+                polled = await client.get(
+                    f"/v1/applications/biotech/coordinator-inboxes/{absent}/notifications",
+                    headers=headers,
+                )
+                assert polled.status_code == 404, polled.text
+                approval = await client.post(
+                    f"/v1/applications/biotech/human-tasks/{absent}/approval-resolutions",
+                    headers=headers,
+                    json={
+                        "request_id": str(uuid4()),
+                        "expected_task_version": 1,
+                        "decision": "approve",
+                        "reviewed_digest": "sha256:" + "a" * 64,
+                    },
+                )
+                assert approval.status_code in {404, 422}, approval.text
         assert not app.state.mission_control_ready

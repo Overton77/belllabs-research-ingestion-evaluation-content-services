@@ -15,6 +15,7 @@ with workflow.unsafe.imports_passed_through():
         child_search_attributes,
         ensure_workflow_search_attributes,
         operation_workflow_search_attributes,
+        phase_for_outcome,
         upsert_family_phase,
     )
     from mission_control.adapters.temporal.workflows.human_gate import (
@@ -103,6 +104,18 @@ RELEASE_BASELINE_ON_BLOCKED_PATCH = "rrm-021-release-baseline-on-blocked"
 # `request_changes` becomes the declared remediation workflow cycle). Runs without declared
 # gates never reach the patch.
 STAGEGRAPH_HUMAN_GATE_PATCH = "mp10-stagegraph-human-gate"
+# MP-12 (SPEC-01 "Temporal integration"): Continue-As-New when the server suggests it at a
+# quiet cycle (no active unit), after draining the message handlers; the boundary state
+# (waits, pauses, pending and applied commands, quiescence) continues unchanged. Histories
+# recorded before the patch replay the forced-only rollover without the drain.
+CONTINUE_AS_NEW_DRAIN_PATCH = "mp12-stagegraph-drain-before-continue-as-new"
+# MP-20 (SPEC-03 "Reject closes the gate as not accepted", 01-STAGE_GRAPH §6-7): when a stage
+# failed (a denied Human Gate included) and every stage still waiting for release is
+# conclusively unreleasable, the family proposes the concluded-without-acceptance completion
+# and the reducer records the typed `failed` outcome, instead of failing `stagegraph_blocked`
+# with the run left active. A stalemate (a release that may still resolve) is unchanged.
+# Histories recorded before the patch replay the `stagegraph_blocked` failure.
+CONCLUDED_FAILURE_PATCH = "mp20-stagegraph-concluded-failure"
 LIABILITY_REJECTIONS = frozenset(
     {
         "budget_not_settled",
@@ -535,6 +548,8 @@ class StageGraphWorkflow:
                         correlation_id=run_input.correlation_id,
                         semantic_input_binding_ref=run_input.semantic_input_binding_ref,
                         effective_configuration_digest=(run_input.effective_configuration_digest),
+                        # MP-20: data only (no command changes), empty for earlier runs.
+                        authored_inputs=run_input.authored_inputs,
                     ),
                     result_type=StageGraphAdmissionActivityResult,
                     start_to_close_timeout=timeout,
@@ -910,7 +925,10 @@ class StageGraphWorkflow:
                 gate_cycle_pending = False
                 continue
 
-            if run_input.force_continue_as_new and not active:
+            if not active and self._rollover_due(run_input):
+                if workflow.patched(CONTINUE_AS_NEW_DRAIN_PATCH):
+                    # MP-12: an Update in flight is never cut off by the rollover.
+                    await workflow.wait_condition(workflow.all_handlers_finished)
                 workflow.continue_as_new(self._continuation(run_input, projection))
 
             completion = interpreter.completion(projection)
@@ -926,6 +944,10 @@ class StageGraphWorkflow:
                         type="stagegraph_cancellation_unresolved",
                         non_retryable=True,
                     )
+            elif not completion.can_terminalize:
+                concluded = interpreter.failure_completion(projection)
+                if concluded is not None and workflow.patched(CONCLUDED_FAILURE_PATCH):
+                    completion = concluded
             if completion.can_terminalize:
                 if self._pending_commands:
                     # F1: drain what was delivered during the final cycle before closing.
@@ -1011,7 +1033,13 @@ class StageGraphWorkflow:
                 upsert_family_phase(
                     attribute_policy,
                     run_input.run_id,
-                    "cancelled" if completion.cancelled else "completed",
+                    (
+                        "cancelled"
+                        if completion.cancelled
+                        else phase_for_outcome(terminal.terminal_outcome)
+                        if completion.failed
+                        else "completed"
+                    ),
                 )
                 return StageGraphRunResult(
                     run_id=run_input.run_id,
@@ -1294,6 +1322,16 @@ class StageGraphWorkflow:
             result_type=BoundaryLifecycleOutcome,
             start_to_close_timeout=activity_timeout,
             retry_policy=RetryPolicy(maximum_attempts=3),
+        )
+
+    @staticmethod
+    def _rollover_due(run_input: StageGraphRunInput) -> bool:
+        """MP-12: the forced rollover, or (patched) the server's suggestion at a quiet cycle."""
+
+        if run_input.force_continue_as_new:
+            return True
+        return workflow.patched(CONTINUE_AS_NEW_DRAIN_PATCH) and (
+            workflow.info().is_continue_as_new_suggested()
         )
 
     def _continuation(self, run_input: StageGraphRunInput, projection: Any) -> StageGraphRunInput:

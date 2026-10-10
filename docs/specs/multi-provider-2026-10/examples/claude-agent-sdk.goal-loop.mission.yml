@@ -1,0 +1,46 @@
+# yaml-language-server: $schema=../../../../src/mission_control/contracts/schemas/mc.mission_manifest.v2.json
+# mission/v2 GoalDirected (Goal Loop root) on the local Claude Agent SDK lane: up to three
+# iterations, an independent verifier on the same lane. Checked example (MP-02): compiled by
+# tests/unit/authoring/test_manifest_v2_launch.py and launch-authored against
+# deployments/examples/manifest-launch-bindings.multi-provider.example.json.
+manifest: mission/v2
+mission:
+  key: claude-coverage-loop
+  title: Raise parser test coverage (Claude Agent SDK Goal Loop)
+  application: ai-engineer
+  goals:
+    - key: coverage_raised
+      description: Parser branch coverage reaches the agreed threshold with passing tests
+      criteria:
+        - key: coverage_reported
+          description: The coverage report shows the threshold met
+          evidence: [coverage_report]
+          acceptance: { schema: coverage_report@1 }
+  environment:
+    lane: claude_agent_sdk
+    model: { profile: claude.default }
+    auth: { profile: claude-sdk-owner-subscription }
+    execution_environment: { kind: local_workspace, profile: worker.linux.default }
+    workspace:
+      repo: { url: "https://github.com/Overton77/mission-control-fixture", ref: main }
+      policy: { mode: managed_worktree, reuse: within_run }
+    continuation: { native_compaction: preferred, fallback: sealed_checkpoint, max_session_turns: 8 }
+    requires:
+      controls: [cancel, queue_instruction]
+      approvals: [workflow_gate, provider_permission]
+      observation: [terminal_result, tool_lifecycle, usage]
+    budget: { tokens: 600000, wall_clock: 3h, tool_calls: 300 }
+    # At least two iterations are allowed; patience bounds iterations without progress.
+    governors: { depth: 1, fan_out: 1, iterations: 3, patience: 2 }
+    side_effects: [read_only, workspace_write]
+  program:
+    key: root
+    behavior: goal_loop
+    objective: coverage_raised
+    # No catalog capability is selected; the loop acts through its own lane session.
+    action_space: [root]
+    verifier: { independent: true }
+    outputs:
+      - { name: coverage_report, schema: coverage_report@1, required: true }
+  controls:
+    commands_allowed: [pause, resume, cancel, queue_instruction]

@@ -62,8 +62,12 @@ class OperationExecutionActivities:
         *,
         worker_identity: str | None = None,
         lane_turns: LaneTurnService | None = None,
+        continuation: Any = None,
     ) -> None:
         self._service = service
+        # MP-12: `continuation.*` (`ContinuationActivities`) on the same queue as `lane.turn`,
+        # so the operation workflow drives a Session Lane's phase machine where it runs.
+        self._continuation = continuation
         self._worker_identity = worker_identity or default_worker_identity()
         # FT-G2: `lane.turn`, `lane.status`, `lane.cancel` beside the operation pair; every
         # worker that serves `operation.execute` serves them on the same queue.
@@ -80,7 +84,8 @@ class OperationExecutionActivities:
 
         if self._lanes is None:
             return ()
-        return (self._lanes.turn, self._lanes.status, self._lanes.cancel)
+        lanes = (self._lanes.turn, self._lanes.status, self._lanes.cancel)
+        return lanes if self._continuation is None else (*lanes, *self._continuation.all())
 
     @activity.defn(name="operation.execute")
     async def execute(self, payload: dict[str, Any]) -> dict[str, Any]:

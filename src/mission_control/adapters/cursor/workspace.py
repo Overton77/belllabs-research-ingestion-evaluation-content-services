@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Final, cast
 from uuid import UUID
 
-from mission_control.adapters.cursor.git_workspaces import GitWorkspaceBackend
+from mission_control.adapters.workspaces.git_workspaces import GitWorkspaceBackend
 from mission_control.application.execution.harness.leases import (
     WorkspaceLease,
     WorkspaceLeaseLedger,
